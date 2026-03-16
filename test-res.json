@@ -1,0 +1,30 @@
+{
+  "produtos": {
+    "status": "OK"
+  },
+  "receitas": {
+    "status": "OK"
+  },
+  "pedidos": {
+    "status": "OK"
+  },
+  "itens_pedido": {
+    "status": "OK"
+  },
+  "clientes": {
+    "status": "OK"
+  },
+  "usuarios": {
+    "status": "OK"
+  },
+  "metas": {
+    "status": "ERROR",
+    "error": "Could not find the table 'public.metas' in the schema cache"
+  },
+  "caixa": {
+    "status": "OK"
+  },
+  "movimentacao_estoque": {
+    "status": "OK"
+  }
+}

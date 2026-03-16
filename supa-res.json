@@ -1,0 +1,9 @@
+{
+  "produtos": "OK",
+  "receitas": "OK",
+  "pedidos": "OK",
+  "itens_pedido": "OK",
+  "clientes": "OK",
+  "usuarios": "OK",
+  "metas": "Could not find the table 'public.metas' in the schema cache"
+}

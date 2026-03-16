@@ -1,0 +1,17 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "moduleResolution": "node",
+        "module": "esnext",
+        "verbatimModuleSyntax": false,
+        "types": [
+            "vitest/globals"
+        ]
+    },
+    "include": [
+        "src/__tests__/**/*.ts",
+        "src/__tests__/**/*.tsx",
+        "src/lib/**/*.ts",
+        "src/components/**/*.tsx"
+    ]
+}
