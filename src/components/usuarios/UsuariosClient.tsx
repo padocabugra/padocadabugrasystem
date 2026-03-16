@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { createBrowserClient } from '@supabase/ssr'
 import { toast } from 'sonner'
 import {
     UserCog, Plus, X, Loader2, Save, Search,
@@ -63,7 +64,20 @@ function ModalAdicionarUsuario({
 
         setSaving(true)
         try {
-            const { data: authData, error: authError } = await supabase.auth.signUp({
+            // Cria um client temporário isolado, SEM persistência de sessão, 
+            // evitando que o Admin atual seja deslogado durante o signUp.
+            const tempSupabase = createBrowserClient(
+                process.env.NEXT_PUBLIC_SUPABASE_URL!,
+                process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+                {
+                    auth: {
+                        persistSession: false,
+                        autoRefreshToken: false,
+                    }
+                }
+            )
+            
+            const { data: authData, error: authError } = await tempSupabase.auth.signUp({
                 email: email.trim(),
                 password: senha,
                 options: {
