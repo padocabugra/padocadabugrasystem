@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import CaixaClient from '@/components/caixa/CaixaClient'
+import { getInicioDoDia } from '@/lib/timezone'
 
 export const metadata = {
     title: 'PDV & Caixa | Padoca CRM',
@@ -22,9 +23,8 @@ export default async function CaixaPage() {
 
     if (!usuario) redirect('/login')
 
-    // Início do dia corrente
-    const inicioDia = new Date()
-    inicioDia.setHours(0, 0, 0, 0)
+    // Início do dia corrente timezone MS
+    const inicioDia = getInicioDoDia()
 
     // Verifica se há abertura de caixa para o usuário no dia atual
     const { data: aberturaHoje } = await supabase
@@ -32,7 +32,7 @@ export default async function CaixaPage() {
         .select('id, valor, saldo, created_at')
         .eq('usuario_id', usuario.id)
         .eq('tipo', 'abertura')
-        .gte('created_at', inicioDia.toISOString())
+        .gte('created_at', inicioDia)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
@@ -42,7 +42,7 @@ export default async function CaixaPage() {
         .from('caixa')
         .select('saldo')
         .eq('usuario_id', usuario.id)
-        .gte('created_at', inicioDia.toISOString())
+        .gte('created_at', inicioDia)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()

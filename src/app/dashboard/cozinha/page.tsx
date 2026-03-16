@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import PainelCozinhaClient, { type PedidoCozinha } from '@/components/cozinha/PainelCozinhaClient'
+import { getInicioDoDia } from '@/lib/timezone'
 
 // Server Component: busca estado inicial dos pedidos do dia e passa para o Client
 export default async function CozinhaPage() {
@@ -9,9 +10,8 @@ export default async function CozinhaPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) redirect('/login')
 
-    // Início do dia corrente (UTC-offset aware via Supabase)
-    const inicioDia = new Date()
-    inicioDia.setHours(0, 0, 0, 0)
+    // Início do dia corrente (Timezone America/Campo_Grande)
+    const inicioDia = getInicioDoDia()
 
     // Busca pedidos do dia que ainda estão no fluxo de produção
     const { data: pedidosRaw } = await supabase
@@ -29,7 +29,7 @@ export default async function CozinhaPage() {
                 produtos ( nome )
             )
         `)
-        .gte('created_at', inicioDia.toISOString())
+        .gte('created_at', inicioDia)
         .not('status', 'in', '("entregue","cancelado")')
         .order('created_at', { ascending: false })
 

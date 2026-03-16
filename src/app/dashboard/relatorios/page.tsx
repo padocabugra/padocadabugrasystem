@@ -73,13 +73,14 @@ interface AjusteEstoque {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+import { dataLocalVisual, getStringDataYMD } from '@/lib/timezone'
 
 function formatDate(d: string) {
-    return new Date(d + 'T00:00:00').toLocaleDateString('pt-BR')
+    return dataLocalVisual(d + 'T00:00:00-04:00')
 }
 
 function formatDateISO(d: Date): string {
-    return d.toISOString().slice(0, 10)
+    return getStringDataYMD(d)
 }
 
 function getDefaultDates() {
@@ -216,8 +217,8 @@ export default function RelatoriosPage() {
 
     const fetchVendas = useCallback(async () => {
         const { data, error } = await supabase.rpc('fn_metricas_vendas', {
-            p_data_inicio: `${dataInicio}T00:00:00Z`,
-            p_data_fim: `${dataFim}T23:59:59Z`,
+            p_data_inicio: `${dataInicio}T00:00:00-04:00`,
+            p_data_fim: `${dataFim}T23:59:59-04:00`,
         })
         if (error) toast.error('Erro ao carregar métricas de vendas')
         else setMetricasVendas((data ?? []) as MetricaVenda[])
@@ -225,8 +226,8 @@ export default function RelatoriosPage() {
 
     const fetchProdutos = useCallback(async () => {
         const { data, error } = await supabase.rpc('fn_curva_abc_produtos', {
-            p_data_inicio: `${dataInicio}T00:00:00Z`,
-            p_data_fim: `${dataFim}T23:59:59Z`,
+            p_data_inicio: `${dataInicio}T00:00:00-04:00`,
+            p_data_fim: `${dataFim}T23:59:59-04:00`,
         })
         if (error) toast.error('Erro ao carregar curva ABC')
         else setCurvaABC((data ?? []) as CurvaABC[])
@@ -234,8 +235,8 @@ export default function RelatoriosPage() {
 
     const fetchCaixa = useCallback(async () => {
         const { data, error } = await supabase.rpc('fn_auditoria_caixa', {
-            p_data_inicio: `${dataInicio}T00:00:00Z`,
-            p_data_fim: `${dataFim}T23:59:59Z`,
+            p_data_inicio: `${dataInicio}T00:00:00-04:00`,
+            p_data_fim: `${dataFim}T23:59:59-04:00`,
         })
         if (error) toast.error('Erro ao carregar auditoria de caixa')
         else setAuditoriaCaixa((data ?? []) as AuditoriaCaixa[])
@@ -243,8 +244,8 @@ export default function RelatoriosPage() {
 
     const fetchEstoque = useCallback(async () => {
         const { data, error } = await supabase.rpc('fn_relatorio_ajustes_estoque', {
-            p_data_inicio: `${dataInicio}T00:00:00Z`,
-            p_data_fim: `${dataFim}T23:59:59Z`,
+            p_data_inicio: `${dataInicio}T00:00:00-04:00`,
+            p_data_fim: `${dataFim}T23:59:59-04:00`,
         })
         if (error) toast.error('Erro ao carregar ajustes de estoque')
         else setAjustesEstoque((data ?? []) as AjusteEstoque[])

@@ -6,6 +6,7 @@ import { ptBR } from 'date-fns/locale'
 import { createClient } from '@/lib/supabase/client'
 import { Clock, ChefHat, Flame, CheckCircle2, Bell, HelpCircle, X, Keyboard, FlaskConical, Loader2, Truck } from 'lucide-react'
 import { toast } from 'sonner'
+import { getAgoraUTC } from '@/lib/timezone'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface ItemPedidoCozinha {
@@ -479,7 +480,7 @@ export default function PainelCozinhaClient({ pedidosIniciais }: PainelCozinhaCl
         )
         const { error } = await supabase
             .from('pedidos')
-            .update({ status: proximoStatus, updated_at: new Date().toISOString() })
+            .update({ status: proximoStatus, updated_at: getAgoraUTC() })
             .eq('id', id)
 
         if (error) {

@@ -9,6 +9,7 @@ import {
     ArrowUpCircle, ChevronRight, RefreshCw, CheckCircle2, X,
     DollarSign, Clock, AlertTriangle, Hash, User, Star
 } from 'lucide-react'
+import { dataHoraLocalVisual, getAgoraUTC } from '@/lib/timezone'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -242,7 +243,7 @@ export default function CaixaClient({
                 troco: Math.max(0, valorPago - pedidoSelecionado.total),
                 formaPagamento,
                 pontosGanhos,
-                dataHora: new Date().toLocaleString('pt-BR'),
+                dataHora: dataHoraLocalVisual(getAgoraUTC()),
             }
 
             setReciboAtual(recibo)

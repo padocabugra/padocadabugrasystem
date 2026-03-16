@@ -18,25 +18,37 @@ interface Cliente {
     created_at: string
 }
 
-/** Verifica se a data de nascimento é hoje (ignora o ano) */
+import { TIMEZONE } from '@/lib/timezone'
+import { toZonedTime } from 'date-fns-tz'
+
+/** Verifica se a data de nascimento é hoje, obedecendo o Fuso MS */
 function isAniversariante(dataNascimento: string | null): boolean {
     if (!dataNascimento) return false
-    const hoje = new Date()
-    const nasc = new Date(dataNascimento + 'T00:00:00') // evita fuso
+    const hojeZoned = toZonedTime(new Date(), TIMEZONE)
+    
+    // extrai M e D diretamente da string 'YYYY-MM-DD'
+    const [, month, day] = dataNascimento.split('-').map(Number)
+    
     return (
-        nasc.getUTCMonth() === hoje.getMonth() &&
-        nasc.getUTCDate() === hoje.getDate()
+        month === (hojeZoned.getMonth() + 1) &&
+        day === hojeZoned.getDate()
     )
 }
 
-/** Verifica se o aniversário é nos próximos N dias */
+/** Verifica se o aniversário é nos próximos N dias, no Fuso MS */
 function aniversarioEmBreve(dataNascimento: string | null, dias = 7): boolean {
     if (!dataNascimento) return false
-    const hoje = new Date()
-    const nasc = new Date(dataNascimento + 'T00:00:00')
-    const proxAniv = new Date(hoje.getFullYear(), nasc.getUTCMonth(), nasc.getUTCDate())
-    if (proxAniv < hoje) proxAniv.setFullYear(hoje.getFullYear() + 1)
-    const diff = (proxAniv.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24)
+    const hojeZoned = toZonedTime(new Date(), TIMEZONE)
+    
+    const [, m, d] = dataNascimento.split('-').map(Number)
+    
+    const proxAniv = new Date(hojeZoned.getFullYear(), m - 1, d)
+    // zera horas pra comparação exata
+    hojeZoned.setHours(0,0,0,0)
+    
+    if (proxAniv < hojeZoned) proxAniv.setFullYear(hojeZoned.getFullYear() + 1)
+    
+    const diff = (proxAniv.getTime() - hojeZoned.getTime()) / (1000 * 60 * 60 * 24)
     return diff > 0 && diff <= dias
 }
 
@@ -224,7 +236,7 @@ export default function ClientesPage() {
                                             </td>
                                             <td className="px-4 py-3 text-gray-600 text-xs">
                                                 {cliente.data_nascimento
-                                                    ? new Date(cliente.data_nascimento + 'T00:00:00').toLocaleDateString('pt-BR')
+                                                    ? cliente.data_nascimento.split('-').reverse().join('/')
                                                     : '—'}
                                             </td>
                                             <td className="px-4 py-3">
