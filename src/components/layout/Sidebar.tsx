@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
@@ -16,6 +17,8 @@ import {
     Settings,
     FlaskConical,
     Store,
+    ChevronLeft,
+    ChevronRight,
 } from 'lucide-react'
 import type { Usuario, NavItem, UserRole } from '@/lib/types'
 import { NAV_ITEMS } from '@/lib/types'
@@ -49,6 +52,7 @@ interface SidebarProps {
 export default function Sidebar({ usuario }: SidebarProps) {
     const pathname = usePathname()
     const router = useRouter()
+    const [isCollapsed, setIsCollapsed] = useState(false)
 
     const visibleItems = NAV_ITEMS.filter((item: NavItem) =>
         item.roles.includes(usuario.role)
@@ -62,22 +66,37 @@ export default function Sidebar({ usuario }: SidebarProps) {
     }
 
     return (
-        <aside className="hidden lg:flex w-64 h-full bg-white border-r border-blue-100 flex-col shadow-sm">
+        <aside 
+            className={`hidden lg:flex flex-col relative h-full bg-primary text-white transition-all duration-300 ease-in-out shadow-lg z-20 ${
+                isCollapsed ? 'w-[5rem]' : 'w-64'
+            }`}
+        >
+            {/* Botão Retrátil */}
+            <button
+                onClick={() => setIsCollapsed(!isCollapsed)}
+                className="absolute -right-3 top-1/2 -translate-y-1/2 bg-white border border-primary text-primary w-6 h-6 rounded-full flex items-center justify-center shadow-md hover:scale-110 hover:bg-gray-50 transition-all focus:outline-none"
+                title={isCollapsed ? 'Expandir Menu' : 'Recolher Menu'}
+            >
+                {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+            </button>
+
             {/* Logo */}
-            <div className="p-5 border-b border-blue-100">
+            <div className={`p-5 border-b border-white/10 flex items-center ${isCollapsed ? 'justify-center px-0' : 'justify-start'}`}>
                 <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center text-white shadow-sm">
+                    <div className="w-9 h-9 shrink-0 rounded-xl bg-white flex items-center justify-center text-primary shadow-sm">
                         <Store className="w-5 h-5" />
                     </div>
-                    <div>
-                        <p className="font-bold text-primary text-sm leading-tight">Padoca da Bugra</p>
-                        <p className="text-xs text-secondary">Sistema de Gestão</p>
-                    </div>
+                    {!isCollapsed && (
+                        <div className="overflow-hidden whitespace-nowrap opacity-100 transition-opacity duration-300">
+                            <p className="font-bold text-white text-sm leading-tight">Padoca da Bugra</p>
+                            <p className="text-xs text-blue-200">Sistema de Gestão</p>
+                        </div>
+                    )}
                 </div>
             </div>
 
             {/* Navegação */}
-            <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
+            <nav className="flex-1 p-3 space-y-1 overflow-y-auto scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
                 {visibleItems.map((item: NavItem) => {
                     const Icon = ICON_MAP[item.href] ?? LayoutDashboard
                     const isFichas = pathname.startsWith('/dashboard/producao/receitas')
@@ -91,31 +110,42 @@ export default function Sidebar({ usuario }: SidebarProps) {
                         <Link
                             key={item.href}
                             href={item.href}
-                            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${isActive
-                                ? 'bg-primary text-white shadow-md shadow-blue-900/5'
-                                : 'text-gray-600 hover:bg-blue-50 hover:text-primary'
-                                }`}
+                            className={`flex items-center rounded-lg text-sm font-medium transition-all group relative overflow-hidden ${
+                                isCollapsed ? 'justify-center p-3' : 'gap-3 px-3 py-2.5'
+                            } ${
+                                isActive
+                                    ? 'bg-white text-primary shadow-sm'
+                                    : 'text-blue-100 hover:bg-white/10 hover:text-white'
+                            }`}
+                            title={isCollapsed ? item.label : undefined}
                         >
-                            <Icon className="w-4 h-4 shrink-0" />
-                            {item.label}
+                            <Icon className={`shrink-0 ${isCollapsed ? 'w-5 h-5' : 'w-4 h-4'}`} />
+                            {!isCollapsed && (
+                                <span className="whitespace-nowrap">{item.label}</span>
+                            )}
                         </Link>
                     )
                 })}
             </nav>
 
             {/* Usuário e Logout */}
-            <div className="p-3 border-t border-blue-100">
-                <div className="px-3 py-2 mb-1">
-                    <p className="text-sm font-semibold text-gray-800 truncate">{usuario.nome}</p>
-                    <p className="text-xs text-secondary">{ROLE_LABELS[usuario.role]}</p>
-                </div>
+            <div className={`p-3 border-t border-white/10 flex flex-col ${isCollapsed ? 'items-center gap-3' : 'gap-1'}`}>
+                {!isCollapsed && (
+                    <div className="px-3 py-2 mb-1 overflow-hidden whitespace-nowrap">
+                        <p className="text-sm font-semibold text-white truncate">{usuario.nome}</p>
+                        <p className="text-xs text-blue-200">{ROLE_LABELS[usuario.role]}</p>
+                    </div>
+                )}
                 <button
                     onClick={handleLogout}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
-            text-gray-500 hover:bg-red-50 hover:text-red-600 transition-colors"
+                    className={`flex items-center rounded-lg text-sm font-medium transition-colors
+                    text-blue-200 hover:bg-red-500/20 hover:text-red-100 ${
+                        isCollapsed ? 'justify-center p-3 w-auto' : 'w-full gap-3 px-3 py-2.5'
+                    }`}
+                    title={isCollapsed ? 'Sair' : undefined}
                 >
-                    <LogOut className="w-4 h-4 shrink-0" />
-                    Sair
+                    <LogOut className={`shrink-0 ${isCollapsed ? 'w-5 h-5' : 'w-4 h-4'}`} />
+                    {!isCollapsed && <span>Sair</span>}
                 </button>
             </div>
         </aside>
