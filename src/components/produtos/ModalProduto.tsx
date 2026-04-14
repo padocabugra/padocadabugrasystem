@@ -103,9 +103,10 @@ export default function ModalProduto({
 
             onSuccess()
             onClose()
-        } catch (error) {
-            console.error('Erro ao salvar produto:', error)
-            alert('Erro ao salvar produto: ' + (error?.message || JSON.stringify(error)))
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : JSON.stringify(err)
+            console.error('Erro ao salvar produto:', err)
+            alert('Erro ao salvar produto: ' + msg)
         }
     }
 
