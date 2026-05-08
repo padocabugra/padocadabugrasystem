@@ -1,6 +1,6 @@
 'use client'
 
-import { ShoppingCart, Plus, Minus, Trash2, SendHorizonal, ChefHat, Wallet } from 'lucide-react'
+import { ShoppingCart, Plus, Minus, Trash2, ChefHat, Wallet, CookingPot, DollarSign } from 'lucide-react'
 import type { ItemCarrinho } from '@/lib/types/pedidos'
 
 interface CarrinhoLateralProps {
@@ -137,11 +137,13 @@ export default function CarrinhoLateral({
                                    : 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/30'
                                }`}
                 >
-                    <SendHorizonal className="w-5 h-5" />
+                    {destinoCozinha
+                        ? <CookingPot className="w-5 h-5" />
+                        : <DollarSign className="w-5 h-5" />}
                     {isSubmitting
                         ? 'Enviando...'
                         : destinoCozinha
-                            ? 'Enviar para Cozinha'
+                            ? 'Enviar pra Cozinha'
                             : 'Enviar Direto p/ Caixa'}
                 </button>
             </div>
