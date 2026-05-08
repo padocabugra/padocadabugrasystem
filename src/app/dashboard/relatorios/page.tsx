@@ -534,9 +534,9 @@ export default function RelatoriosPage() {
                             { label: 'Total Vendas', value: resumoVendas.totalVendas, color: 'bg-gray-50 text-gray-700 border-gray-100' },
                             { label: 'Custo Total', value: formatCurrency(resumoVendas.totalCusto), color: 'bg-blue-50 text-blue-700 border-blue-100' },
                         ].map((kpi) => (
-                            <div key={kpi.label} className={`px-4 py-3 rounded-xl border ${kpi.color}`}>
-                                <p className="text-lg font-extrabold leading-none">{kpi.value}</p>
-                                <p className="text-xs opacity-70 mt-0.5">{kpi.label}</p>
+                            <div key={kpi.label} className={`px-4 py-3 rounded-xl border min-w-0 ${kpi.color}`}>
+                                <p className="text-lg font-extrabold leading-none truncate">{kpi.value}</p>
+                                <p className="text-xs opacity-70 mt-0.5 truncate">{kpi.label}</p>
                             </div>
                         ))}
                     </div>

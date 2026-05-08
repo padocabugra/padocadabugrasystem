@@ -51,12 +51,12 @@ export default async function CozinhaPage() {
     return (
         <div className="flex flex-col gap-4 h-full">
             {/* Top Bar */}
-            <div className="flex items-center justify-between shrink-0">
-                <div>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shrink-0">
+                <div className="min-w-0">
                     <h1 className="text-xl font-bold text-gray-900">Painel da Cozinha</h1>
                     <p className="text-sm text-gray-500">Atualização em tempo real via Supabase Realtime.</p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 shrink-0">
                     <span className="text-xs text-gray-400 hidden sm:block">
                         Pressione <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-[10px] font-mono font-bold">?</kbd> para atalhos
                     </span>

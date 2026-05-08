@@ -76,12 +76,12 @@ export default function MobileHeader({ usuario }: MobileHeaderProps) {
                     </div>
                 </div>
 
-                <div className="flex items-center gap-3">
-                    <div className="text-right">
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider leading-none">
+                <div className="flex items-center gap-3 min-w-0">
+                    <div className="text-right min-w-0">
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider leading-none truncate">
                             {usuario.role}
                         </p>
-                        <p className="text-sm font-bold text-gray-800 leading-tight">
+                        <p className="text-sm font-bold text-gray-800 leading-tight truncate max-w-[120px]">
                             {usuario.nome.split(' ')[0]}
                         </p>
                     </div>

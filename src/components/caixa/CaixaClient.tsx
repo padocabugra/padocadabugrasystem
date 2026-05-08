@@ -621,10 +621,10 @@ export default function CaixaClient({
             )}
 
             {/* ── Layout Principal ── */}
-            <div className="flex flex-col h-[calc(100vh-theme(spacing.16)-theme(spacing.12))] gap-0 -m-6">
+            <div className="flex flex-col h-[calc(100vh-theme(spacing.16)-theme(spacing.12))] gap-0 -m-3 sm:-m-4 lg:-m-6">
 
                 {/* Header do Caixa */}
-                <header className="flex items-center justify-between px-6 py-3 bg-white border-b border-blue-100 shrink-0">
+                <header className="flex items-center justify-between gap-2 flex-wrap px-3 sm:px-6 py-3 bg-white border-b border-blue-100 shrink-0">
                     <div className="flex items-center gap-4">
                         <div>
                             <h1 className="text-base font-extrabold text-gray-900 leading-none">PDV & Caixa</h1>
@@ -673,10 +673,10 @@ export default function CaixaClient({
                 </header>
 
                 {/* ── Tela dividida: Pedidos | Conta ── */}
-                <div className="flex flex-1 overflow-hidden">
+                <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
 
                     {/* ════ LADO ESQUERDO: Lista de Pedidos Prontos ════ */}
-                    <div className="flex flex-col w-[340px] xl:w-[380px] shrink-0 border-r border-blue-50 bg-white overflow-hidden">
+                    <div className="flex flex-col w-full lg:w-[340px] xl:w-[380px] lg:shrink-0 border-b lg:border-b-0 lg:border-r border-blue-50 bg-white overflow-hidden max-h-[45vh] lg:max-h-none">
                         {/* Busca */}
                         <div className="p-3 border-b border-blue-50">
                             <div className="relative">

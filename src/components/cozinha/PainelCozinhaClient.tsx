@@ -419,7 +419,7 @@ function Coluna({
     const Icon = cfg.icon
 
     return (
-        <div className={`flex flex-col min-h-0 flex-1 rounded-2xl ring-2 ${cfg.ring} overflow-hidden`}>
+        <div className={`flex flex-col min-h-0 flex-1 max-h-[60vh] lg:max-h-none rounded-2xl ring-2 ${cfg.ring} overflow-hidden`}>
             {/* Cabeçalho da coluna */}
             <div className={`${cfg.header} flex items-center justify-between px-4 py-3 shrink-0`}>
                 <div className="flex items-center gap-2 text-white font-bold text-base">
@@ -621,7 +621,7 @@ export default function PainelCozinhaClient({ pedidosIniciais }: PainelCozinhaCl
 
     return (
         <>
-            <div className="flex gap-4 h-[calc(100vh-8rem)] min-h-0">
+            <div className="flex flex-col lg:flex-row gap-4 lg:h-[calc(100vh-8rem)] min-h-0">
                 <Coluna status="pendente" pedidos={pendentes} onAvancar={handleAvancar} onClickProduto={handleClickProduto} />
                 <Coluna status="preparando" pedidos={preparandoList} onAvancar={handleAvancar} onClickProduto={handleClickProduto} />
                 <Coluna status="pronto" pedidos={prontos} onAvancar={handleAvancar} onClickProduto={handleClickProduto} />

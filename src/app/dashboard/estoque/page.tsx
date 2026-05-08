@@ -201,7 +201,7 @@ export default function EstoquePage() {
                     </h1>
                     <p className="text-sm text-gray-500 mt-0.5">Controle de produtos, matérias-primas e alertas de reposição</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                     <Link
                         href="/dashboard/estoque/inventario"
                         className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-xl text-sm font-bold transition-all active:scale-[0.98] shadow-sm"
@@ -228,10 +228,10 @@ export default function EstoquePage() {
                     { label: 'Valor em Estoque', value: formatCurrency(stats.valorTotal), icon: <ArrowUpCircle className="w-4 h-4" />, color: 'bg-emerald-50 text-emerald-700 border-emerald-100' },
                 ].map((s) => (
                     <div key={s.label} className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${s.color}`}>
-                        <div className="opacity-70">{s.icon}</div>
-                        <div>
-                            <p className="text-lg font-extrabold leading-none">{s.value}</p>
-                            <p className="text-xs opacity-70 mt-0.5">{s.label}</p>
+                        <div className="opacity-70 shrink-0">{s.icon}</div>
+                        <div className="min-w-0">
+                            <p className="text-lg font-extrabold leading-none truncate">{s.value}</p>
+                            <p className="text-xs opacity-70 mt-0.5 truncate">{s.label}</p>
                         </div>
                     </div>
                 ))}

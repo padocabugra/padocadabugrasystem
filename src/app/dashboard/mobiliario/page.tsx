@@ -296,10 +296,10 @@ export default function MobiliarioPage() {
                     { label: 'Novos / Usados', value: `${stats.novos} / ${stats.usados}`, icon: <CheckCircle2 className="w-4 h-4" />, color: 'bg-gray-50 text-gray-600 border-gray-100' },
                 ].map((s) => (
                     <div key={s.label} className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${s.color}`}>
-                        <div className="opacity-70">{s.icon}</div>
-                        <div>
-                            <p className="text-lg font-extrabold leading-none">{s.value}</p>
-                            <p className="text-xs opacity-70 mt-0.5">{s.label}</p>
+                        <div className="opacity-70 shrink-0">{s.icon}</div>
+                        <div className="min-w-0">
+                            <p className="text-lg font-extrabold leading-none truncate">{s.value}</p>
+                            <p className="text-xs opacity-70 mt-0.5 truncate">{s.label}</p>
                         </div>
                     </div>
                 ))}

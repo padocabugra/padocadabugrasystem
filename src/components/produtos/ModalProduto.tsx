@@ -213,7 +213,7 @@ export default function ModalProduto({
                     </div>
 
                     {/* Linha 3: Estoques e Unidade */}
-                    <div className="grid grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div className="space-y-1.5">
                             <label className="text-sm font-medium text-gray-700">Estoque Atual</label>
                             <input
@@ -282,7 +282,7 @@ export default function ModalProduto({
                     </div>
 
                     {/* Footer: Toggle Ativo + Botões */}
-                    <div className="pt-6 border-t border-gray-100 flex items-center justify-between">
+                    <div className="pt-6 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                         <label className="flex items-center gap-2 cursor-pointer select-none">
                             <div className="relative">
                                 <input type="checkbox" className="sr-only peer" {...register('ativo')} />

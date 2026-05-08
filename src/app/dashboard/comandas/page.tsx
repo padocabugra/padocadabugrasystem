@@ -89,16 +89,16 @@ export default function ComandasAdminPage() {
     return (
         <div className="max-w-4xl mx-auto space-y-6">
             {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="min-w-0">
                     <div className="flex items-center gap-3">
                         <Link
                             href="/dashboard/configuracoes"
-                            className="p-2 rounded-xl hover:bg-gray-100 transition-colors"
+                            className="p-2 rounded-xl hover:bg-gray-100 transition-colors shrink-0"
                         >
                             <ArrowLeft className="w-5 h-5 text-gray-500" />
                         </Link>
-                        <div>
+                        <div className="min-w-0">
                             <h1 className="text-xl font-extrabold text-gray-900 flex items-center gap-2">
                                 <CreditCard className="w-5 h-5 text-emerald-600" />
                                 Comandas
@@ -114,7 +114,7 @@ export default function ComandasAdminPage() {
                     disabled={actionLoading === 'reset-all' || ocupadas === 0}
                     className="h-11 px-5 rounded-xl bg-red-500 text-white font-semibold text-sm
                                flex items-center gap-2 hover:bg-red-600 active:scale-95 transition-all
-                               disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
+                               disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation shrink-0 self-start sm:self-auto"
                 >
                     {actionLoading === 'reset-all' ? (
                         <Loader2 className="w-4 h-4 animate-spin" />

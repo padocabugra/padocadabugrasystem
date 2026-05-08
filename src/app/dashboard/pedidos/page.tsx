@@ -33,8 +33,8 @@ export default async function PedidosPage({ searchParams }: PedidosPageProps) {
     return (
         <div className="flex flex-col gap-6">
             {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="min-w-0">
                     <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                         {isDeliveryView && <Truck className="w-5 h-5 text-primary" />}
                         {isDeliveryView ? 'Pedidos Delivery' : 'Pedidos'}
@@ -45,11 +45,11 @@ export default async function PedidosPage({ searchParams }: PedidosPageProps) {
                             : 'Acompanhe seus pedidos em tempo real.'}
                     </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                     {!isDeliveryView && (
                         <Link
                             href="/dashboard/pdv"
-                            className="h-14 px-5 rounded-xl font-bold flex items-center gap-2 text-sm
+                            className="h-14 px-4 sm:px-5 rounded-xl font-bold flex items-center gap-2 text-sm
                                        bg-emerald-500 hover:bg-emerald-600 text-white
                                        shadow-lg shadow-emerald-500/30
                                        active:scale-95 transition-all touch-manipulation"
@@ -60,7 +60,7 @@ export default async function PedidosPage({ searchParams }: PedidosPageProps) {
                     )}
                     <Link
                         href={`/dashboard/pedidos/novo${isDeliveryView ? '?tipo=delivery' : ''}`}
-                        className={`h-14 px-5 rounded-xl font-semibold flex items-center gap-2 text-sm
+                        className={`h-14 px-4 sm:px-5 rounded-xl font-semibold flex items-center gap-2 text-sm
                                     active:scale-95 transition-all touch-manipulation ${isDeliveryView
                                 ? 'bg-[#054F77] hover:bg-[#054F77]/90 text-white'
                                 : 'bg-primary text-white hover:bg-primary/90'

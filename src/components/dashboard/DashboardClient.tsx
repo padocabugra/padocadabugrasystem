@@ -135,16 +135,16 @@ export default function DashboardClient({ nomeUsuario, role }: DashboardClientPr
     return (
         <div className="space-y-5">
             {/* ─── Header ─────────────────────────────────────────────────── */}
-            <div className="flex items-center justify-between">
-                <div>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="min-w-0">
                     <h1 className="text-xl font-extrabold text-gray-900">
                         Olá, {nomeUsuario} 👋
                     </h1>
-                    <p className="text-sm text-gray-500 mt-0.5">
+                    <p className="text-xs sm:text-sm text-gray-500 mt-0.5">
                         Visão geral da Padoca da Bugra — {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
                     </p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 shrink-0">
                     <button
                         onClick={() => fetchDashboard(true)}
                         disabled={refreshing}
@@ -170,7 +170,7 @@ export default function DashboardClient({ nomeUsuario, role }: DashboardClientPr
                         </div>
                         <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wide">Hoje</span>
                     </div>
-                    <p className="text-2xl font-extrabold text-gray-900 leading-none">
+                    <p className="text-xl sm:text-2xl font-extrabold text-gray-900 leading-none truncate">
                         {formatCurrency(kpis?.total_vendas ?? 0)}
                     </p>
                     <p className="text-xs text-gray-500 mt-1">Faturamento</p>
@@ -184,7 +184,7 @@ export default function DashboardClient({ nomeUsuario, role }: DashboardClientPr
                         </div>
                         <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wide">Hoje</span>
                     </div>
-                    <p className="text-2xl font-extrabold text-gray-900 leading-none">
+                    <p className="text-xl sm:text-2xl font-extrabold text-gray-900 leading-none truncate">
                         {kpis?.qtd_pedidos ?? 0}
                     </p>
                     <p className="text-xs text-gray-500 mt-1">Pedidos Entregues</p>
@@ -198,7 +198,7 @@ export default function DashboardClient({ nomeUsuario, role }: DashboardClientPr
                         </div>
                         <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wide">Hoje</span>
                     </div>
-                    <p className="text-2xl font-extrabold text-gray-900 leading-none">
+                    <p className="text-xl sm:text-2xl font-extrabold text-gray-900 leading-none truncate">
                         {formatCurrency(kpis?.ticket_medio ?? 0)}
                     </p>
                     <p className="text-xs text-gray-500 mt-1">Ticket Médio</p>
@@ -219,7 +219,7 @@ export default function DashboardClient({ nomeUsuario, role }: DashboardClientPr
                             </span>
                         )}
                     </div>
-                    <p className={`text-2xl font-extrabold leading-none ${(kpis?.estoque_critico ?? 0) > 0 ? 'text-red-700' : 'text-gray-900'}`}>
+                    <p className={`text-xl sm:text-2xl font-extrabold leading-none truncate ${(kpis?.estoque_critico ?? 0) > 0 ? 'text-red-700' : 'text-gray-900'}`}>
                         {kpis?.estoque_critico ?? 0}
                     </p>
                     <p className="text-xs text-gray-500 mt-1">Estoque Crítico</p>

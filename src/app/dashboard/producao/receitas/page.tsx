@@ -75,7 +75,7 @@ export default function ReceitasPage() {
                         Cadastre receitas completas com ingredientes, custos, preparo e nutrição.
                     </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                     <a
                         href="/dashboard/producao"
                         className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-primary bg-primary/10 hover:bg-primary/20 rounded-xl transition-colors"

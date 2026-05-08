@@ -103,8 +103,8 @@ export default function ClientesPage() {
     return (
         <div className="space-y-6">
             {/* Cabeçalho */}
-            <div className="flex items-center justify-between">
-                <div>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="min-w-0">
                     <h1 className="text-2xl font-bold text-gray-800">Clientes</h1>
                     <p className="text-gray-500 text-sm mt-0.5">
                         {clientes.length} cliente{clientes.length !== 1 ? 's' : ''} encontrado{clientes.length !== 1 ? 's' : ''}
@@ -113,7 +113,7 @@ export default function ClientesPage() {
                 <button
                     onClick={() => setModalOpen(true)}
                     className="flex items-center gap-2 px-4 py-2.5 bg-primary hover:bg-primary/90
-            text-white text-sm font-semibold rounded-lg transition-colors"
+            text-white text-sm font-semibold rounded-lg transition-colors shrink-0 self-start sm:self-auto"
                 >
                     <UserPlus className="w-4 h-4" />
                     Novo Cliente
@@ -123,14 +123,14 @@ export default function ClientesPage() {
             {/* Banner: Aniversariantes de HOJE */}
             {aniversariantesHoje.length > 0 && (
                 <div className="flex items-start gap-3 p-4 rounded-xl bg-blue-50 border border-blue-200">
-                    <span className="text-2xl">🎂</span>
-                    <div>
+                    <span className="text-2xl shrink-0">🎂</span>
+                    <div className="min-w-0">
                         <p className="font-semibold text-blue-800 text-sm">
                             {aniversariantesHoje.length === 1
                                 ? 'Aniversariante hoje!'
                                 : `${aniversariantesHoje.length} aniversariantes hoje!`}
                         </p>
-                        <p className="text-blue-700 text-sm mt-0.5">
+                        <p className="text-blue-700 text-sm mt-0.5 break-words">
                             {aniversariantesHoje.map((c) => c.nome).join(', ')}
                         </p>
                     </div>
@@ -141,9 +141,9 @@ export default function ClientesPage() {
             {aniversariantesBreve.length > 0 && (
                 <div className="flex items-start gap-3 p-4 rounded-xl bg-blue-50 border border-blue-200">
                     <Cake className="w-5 h-5 text-blue-500 mt-0.5 shrink-0" />
-                    <div>
+                    <div className="min-w-0">
                         <p className="font-semibold text-blue-800 text-sm">Aniversários nos próximos 7 dias</p>
-                        <p className="text-blue-700 text-sm mt-0.5">
+                        <p className="text-blue-700 text-sm mt-0.5 break-words">
                             {aniversariantesBreve.map((c) => c.nome).join(', ')}
                         </p>
                     </div>

@@ -76,8 +76,8 @@ export default function ListaPedidosClient({ pedidosIniciais, filtroTipoInicial 
     return (
         <div className="flex flex-col gap-3">
             {/* Filtro por tipo */}
-            <div className="flex items-center gap-2">
-                <Filter className="w-4 h-4 text-gray-400" />
+            <div className="flex items-center gap-2 flex-wrap">
+                <Filter className="w-4 h-4 text-gray-400 shrink-0" />
                 {([
                     { value: 'todos' as const, label: 'Todos', icon: null },
                     { value: 'local' as const, label: 'Local', icon: MapPin },
@@ -97,7 +97,7 @@ export default function ListaPedidosClient({ pedidosIniciais, filtroTipoInicial 
                         {f.label}
                     </button>
                 ))}
-                <span className="text-xs text-gray-400 ml-2">
+                <span className="text-xs text-gray-400 ml-2 shrink-0">
                     {pedidosFiltrados.length} pedido{pedidosFiltrados.length !== 1 ? 's' : ''}
                 </span>
             </div>
@@ -118,7 +118,7 @@ export default function ListaPedidosClient({ pedidosIniciais, filtroTipoInicial 
                         return (
                             <div
                                 key={pedido.id}
-                                className={`flex items-center gap-4 bg-white rounded-2xl border px-5 py-4 shadow-sm transition-all
+                                className={`flex items-center gap-2 sm:gap-4 bg-white rounded-2xl border px-3 sm:px-5 py-3 sm:py-4 shadow-sm transition-all
                                            ${pedido.status === 'pronto' ? 'border-green-300 ring-2 ring-green-100 animate-pulse-subtle' : ''}
                                            ${isDelivery ? 'border-l-4 border-l-[#054F77] border-blue-100' : 'border-blue-100'}`}
                             >
@@ -126,10 +126,10 @@ export default function ListaPedidosClient({ pedidosIniciais, filtroTipoInicial 
                                     <div className="flex items-center gap-2">
                                         <p className="font-bold text-gray-900 truncate">{clienteNome}</p>
                                         {pedido.status === 'pronto' && (
-                                            <span className="flex h-2 w-2 rounded-full bg-green-500 animate-ping" />
+                                            <span className="flex h-2 w-2 rounded-full bg-green-500 animate-ping shrink-0" />
                                         )}
                                     </div>
-                                    <p className="text-xs text-gray-500 flex items-center gap-1.5 mt-0.5">
+                                    <p className="text-xs text-gray-500 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-0.5">
                                         {isDelivery ? (
                                             <span className="font-black text-primary flex items-center gap-1">
                                                 <Truck className="w-3 h-3" />
@@ -142,13 +142,13 @@ export default function ListaPedidosClient({ pedidosIniciais, filtroTipoInicial 
                                         )}
                                         {pedido.comanda?.numero && (
                                             <>
-                                                ·
+                                                <span>·</span>
                                                 <span className="font-bold text-emerald-600">
                                                     CMD {pedido.comanda.numero}
                                                 </span>
                                             </>
                                         )}
-                                        ·
+                                        <span>·</span>
                                         <span>
                                             {new Date(pedido.created_at).toLocaleTimeString('pt-BR', {
                                                 hour: '2-digit', minute: '2-digit'
@@ -157,20 +157,20 @@ export default function ListaPedidosClient({ pedidosIniciais, filtroTipoInicial 
                                     </p>
                                 </div>
 
-                                {/* Badge Delivery */}
+                                {/* Badge Delivery (escondido em mobile — já temos a borda azul + texto DELIVERY no meta) */}
                                 {isDelivery && (
-                                    <span className="flex items-center gap-1 px-2 py-1 bg-blue-50 text-primary rounded-full text-[10px] font-black uppercase tracking-wider border border-blue-200">
+                                    <span className="hidden sm:flex items-center gap-1 px-2 py-1 bg-blue-50 text-primary rounded-full text-[10px] font-black uppercase tracking-wider border border-blue-200 shrink-0">
                                         <Truck className="w-3 h-3" />
                                         Delivery
                                     </span>
                                 )}
 
-                                <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[10px] font-black uppercase tracking-wider ${config.color}`}>
+                                <div className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-full border text-[10px] font-black uppercase tracking-wider shrink-0 ${config.color}`}>
                                     <Icon className="w-3 h-3" />
                                     {config.label}
                                 </div>
 
-                                <p className="text-base font-black text-primary shrink-0 ml-2">
+                                <p className="text-sm sm:text-base font-black text-primary shrink-0 ml-1 sm:ml-2">
                                     {formatCurrency(Number(pedido.total))}
                                 </p>
 
