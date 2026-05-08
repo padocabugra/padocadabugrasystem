@@ -10,6 +10,8 @@ import {
     DollarSign, Clock, AlertTriangle, Hash, User, Star
 } from 'lucide-react'
 import { dataHoraLocalVisual, getAgoraUTC } from '@/lib/timezone'
+import { unformatCPF, isValidCPF } from '@/lib/formatters'
+import CpfNotaInput from '@/components/shared/CpfNotaInput'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -27,7 +29,7 @@ interface PedidoPDV {
     total: number
     status: string
     created_at: string
-    cliente: { nome: string } | null
+    cliente: { nome: string; cpf?: string | null } | null
     itens_pedido: ItemPedidoPDV[]
 }
 
@@ -60,6 +62,8 @@ interface DadosRecibo {
     pontosGanhos: number
     dataHora: string
     nfce?: NfceInfo
+    /** CPF formatado (snapshot pra reemitir). Vazio se não informado. */
+    cpfCliente?: string
 }
 
 const FORMAS_PAGAMENTO: { value: FormaPagamento; label: string; icon: React.ReactNode }[] = [
@@ -114,6 +118,9 @@ export default function CaixaClient({
 
     // Modal Cupom Digital
     const [reciboAtual, setReciboAtual] = useState<DadosRecibo | null>(null)
+
+    // CPF na nota (opcional). Formatado: 000.000.000-00
+    const [cpfNota, setCpfNota] = useState('')
 
     // Modal Sangria / Reforço
     const [modalMovimentacao, setModalMovimentacao] = useState<'sangria' | 'reforco' | null>(null)
@@ -210,8 +217,11 @@ export default function CaixaClient({
 
     // ── Finalizar Venda ───────────────────────────────────────────────────────
 
-    async function emitirNFCe(pedido: PedidoPDV, forma: FormaPagamento): Promise<NfceInfo> {
+    async function emitirNFCe(pedido: PedidoPDV, forma: FormaPagamento, cpf?: string): Promise<NfceInfo> {
         try {
+            const cpfDigits = cpf ? unformatCPF(cpf) : ''
+            const cpfClienteEnvio = cpfDigits.length === 11 && isValidCPF(cpfDigits) ? cpfDigits : undefined
+
             const res = await fetch('/api/nfce/emitir', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -219,6 +229,7 @@ export default function CaixaClient({
                     pedidoId: pedido.id,
                     total: pedido.total,
                     formaPagamento: forma,
+                    cpfCliente: cpfClienteEnvio,
                     itens: pedido.itens_pedido.map((i) => ({
                         nome: i.produto?.nome ?? 'Produto',
                         quantidade: i.quantidade,
@@ -256,7 +267,7 @@ export default function CaixaClient({
             cliente: reciboAtual.clienteNome ? { nome: reciboAtual.clienteNome } : null,
             itens_pedido: reciboAtual.itens,
         }
-        const nfce = await emitirNFCe(pedidoMin, reciboAtual.formaPagamento)
+        const nfce = await emitirNFCe(pedidoMin, reciboAtual.formaPagamento, reciboAtual.cpfCliente)
         setReciboAtual({ ...reciboAtual, nfce })
     }
 
@@ -291,7 +302,7 @@ export default function CaixaClient({
                 : 0
 
             // NFC-e — emite após pagamento confirmado. Falha NÃO cancela a venda.
-            const nfce = await emitirNFCe(pedidoSelecionado, formaPagamento)
+            const nfce = await emitirNFCe(pedidoSelecionado, formaPagamento, cpfNota)
 
             const recibo: DadosRecibo = {
                 pedidoId: pedidoSelecionado.id,
@@ -305,12 +316,14 @@ export default function CaixaClient({
                 pontosGanhos,
                 dataHora: dataHoraLocalVisual(getAgoraUTC()),
                 nfce,
+                cpfCliente: cpfNota,
             }
 
             setReciboAtual(recibo)
             setPedidoSelecionado(null)
             setFormaPagamento('dinheiro')
             setValorRecebido('')
+            setCpfNota('')
             await carregarPedidosProntos()
         } catch (err: any) {
             toast.error('Erro ao finalizar venda: ' + err.message)
@@ -822,6 +835,13 @@ export default function CaixaClient({
                                             {formatCurrency(pedidoSelecionado.total)}
                                         </span>
                                     </div>
+
+                                    {/* CPF na nota (opcional) — antes da forma de pagamento */}
+                                    <CpfNotaInput
+                                        value={cpfNota}
+                                        onChange={setCpfNota}
+                                        cpfInicial={pedidoSelecionado.cliente?.cpf ?? null}
+                                    />
 
                                     {/* Forma de Pagamento */}
                                     <div>

@@ -56,7 +56,7 @@ export default async function CaixaPage() {
             total,
             status,
             created_at,
-            cliente:clientes ( nome ),
+            cliente:clientes ( nome, cpf ),
             itens_pedido (
                 id,
                 quantidade,

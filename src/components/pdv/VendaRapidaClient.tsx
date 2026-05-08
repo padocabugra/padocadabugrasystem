@@ -9,8 +9,9 @@ import {
     Receipt, AlertTriangle,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { formatCurrency } from '@/lib/formatters'
+import { formatCurrency, unformatCPF, isValidCPF } from '@/lib/formatters'
 import type { Produto } from '@/lib/types'
+import CpfNotaInput from '@/components/shared/CpfNotaInput'
 
 type FormaPagamento = 'dinheiro' | 'pix' | 'debito' | 'credito'
 
@@ -35,6 +36,8 @@ interface ReciboFinal {
     formaPagamento: FormaPagamento
     itensSnapshot: CartItem[]
     nfce: NfceInfo
+    /** CPF formatado (snapshot pra reemitir). Vazio se não informado. */
+    cpfCliente?: string
 }
 
 interface Props {
@@ -64,6 +67,9 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
     const [processando, setProcessando] = useState(false)
 
     const [recibo, setRecibo] = useState<ReciboFinal | null>(null)
+
+    // CPF na nota (opcional). Formatado: 000.000.000-00
+    const [cpfNota, setCpfNota] = useState('')
 
     // ── Filtros ───────────────────────────────────────────────────────
     const produtosFiltrados = useMemo(() => {
@@ -156,8 +162,12 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
         valorTotal: number,
         forma: FormaPagamento,
         itens: CartItem[],
+        cpf?: string,
     ): Promise<NfceInfo> {
         try {
+            const cpfDigits = cpf ? unformatCPF(cpf) : ''
+            const cpfClienteEnvio = cpfDigits.length === 11 && isValidCPF(cpfDigits) ? cpfDigits : undefined
+
             const res = await fetch('/api/nfce/emitir', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -165,6 +175,7 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                     pedidoId,
                     total: valorTotal,
                     formaPagamento: forma,
+                    cpfCliente: cpfClienteEnvio,
                     itens: itens.map((i) => ({
                         nome: i.nome,
                         quantidade: i.quantidade,
@@ -192,7 +203,13 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
 
     async function handleReemitirNFCe() {
         if (!recibo) return
-        const nfce = await emitirNFCe(recibo.pedidoId, recibo.total, recibo.formaPagamento, recibo.itensSnapshot)
+        const nfce = await emitirNFCe(
+            recibo.pedidoId,
+            recibo.total,
+            recibo.formaPagamento,
+            recibo.itensSnapshot,
+            recibo.cpfCliente,
+        )
         setRecibo({ ...recibo, nfce })
     }
 
@@ -238,10 +255,12 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
         const formaSnapshot = formaPagamento
         const itensSnapshot = carrinho
 
+        const cpfSnapshot = cpfNota
+
         toast.success(`Venda finalizada! Total: ${formatCurrency(totalSnapshot)}`)
 
         // Emite NFC-e (não cancela a venda se falhar)
-        const nfce = await emitirNFCe(pedidoId, totalSnapshot, formaSnapshot, itensSnapshot)
+        const nfce = await emitirNFCe(pedidoId, totalSnapshot, formaSnapshot, itensSnapshot, cpfSnapshot)
 
         setRecibo({
             pedidoId,
@@ -250,12 +269,14 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
             formaPagamento: formaSnapshot,
             itensSnapshot,
             nfce,
+            cpfCliente: cpfSnapshot,
         })
 
         setCarrinho([])
         setModalPagamento(false)
         setValorRecebido('')
         setFormaPagamento('dinheiro')
+        setCpfNota('')
         setProcessando(false)
     }
 
@@ -422,6 +443,9 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                         </div>
 
                         <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+                            {/* CPF na nota (opcional) — antes da forma de pagamento */}
+                            <CpfNotaInput value={cpfNota} onChange={setCpfNota} />
+
                             <div>
                                 <p className="text-sm font-semibold text-gray-700 mb-2">Forma de Pagamento</p>
                                 <div className="grid grid-cols-2 gap-2">
