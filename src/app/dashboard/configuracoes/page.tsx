@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import {
     BarChart3, Building2, UserCog, ArrowRight,
-    Settings, TrendingUp, Shield,
+    Settings, TrendingUp, Shield, CreditCard,
 } from 'lucide-react'
 
 const CARDS = [
@@ -30,6 +30,14 @@ const CARDS = [
         icon: UserCog,
         color: 'bg-blue-50 text-blue-600 border-blue-100',
         iconBg: 'bg-blue-100',
+    },
+    {
+        title: 'Comandas',
+        description: 'Gerenciar, resetar e bloquear comandas do estabelecimento',
+        href: '/dashboard/comandas',
+        icon: CreditCard,
+        color: 'bg-emerald-50 text-emerald-600 border-emerald-100',
+        iconBg: 'bg-emerald-100',
     },
 ]
 

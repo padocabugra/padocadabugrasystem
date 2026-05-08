@@ -41,6 +41,13 @@ interface Props {
 
 type FormaPagamento = 'dinheiro' | 'pix' | 'debito' | 'credito'
 
+interface NfceInfo {
+    ok: boolean
+    chaveAcesso?: string
+    danfeUrl?: string
+    erro?: string
+}
+
 interface DadosRecibo {
     pedidoId: string
     mesa: number | null
@@ -52,6 +59,7 @@ interface DadosRecibo {
     formaPagamento: FormaPagamento
     pontosGanhos: number
     dataHora: string
+    nfce?: NfceInfo
 }
 
 const FORMAS_PAGAMENTO: { value: FormaPagamento; label: string; icon: React.ReactNode }[] = [
@@ -202,6 +210,56 @@ export default function CaixaClient({
 
     // ── Finalizar Venda ───────────────────────────────────────────────────────
 
+    async function emitirNFCe(pedido: PedidoPDV, forma: FormaPagamento): Promise<NfceInfo> {
+        try {
+            const res = await fetch('/api/nfce/emitir', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    pedidoId: pedido.id,
+                    total: pedido.total,
+                    formaPagamento: forma,
+                    itens: pedido.itens_pedido.map((i) => ({
+                        nome: i.produto?.nome ?? 'Produto',
+                        quantidade: i.quantidade,
+                        valorUnitario: i.preco_unitario,
+                    })),
+                }),
+            })
+            const json = await res.json()
+            if (json.ok) {
+                toast.success('NFC-e emitida!', {
+                    description: `Chave: ${String(json.chaveAcesso ?? '').slice(0, 16)}…`,
+                })
+            } else {
+                toast.warning('Venda registrada, mas NFC-e falhou', {
+                    description: json.erro,
+                })
+            }
+            return json
+        } catch (err: any) {
+            const msg = err?.message ?? 'erro de rede'
+            toast.warning('Venda registrada, mas NFC-e falhou', { description: msg })
+            return { ok: false, erro: msg }
+        }
+    }
+
+    async function handleReemitirNFCe() {
+        if (!reciboAtual) return
+        // Reconstrói o "pedido" mínimo para reemitir
+        const pedidoMin: PedidoPDV = {
+            id: reciboAtual.pedidoId,
+            numero_mesa: reciboAtual.mesa,
+            total: reciboAtual.total,
+            status: 'entregue',
+            created_at: '',
+            cliente: reciboAtual.clienteNome ? { nome: reciboAtual.clienteNome } : null,
+            itens_pedido: reciboAtual.itens,
+        }
+        const nfce = await emitirNFCe(pedidoMin, reciboAtual.formaPagamento)
+        setReciboAtual({ ...reciboAtual, nfce })
+    }
+
     async function handleFinalizarVenda() {
         if (!pedidoSelecionado || !aberturaHoje) return
 
@@ -216,7 +274,7 @@ export default function CaixaClient({
 
         setProcessandoVenda(true)
         try {
-            const { data, error } = await supabase.rpc('finalizar_venda_pdv', {
+            const { error } = await supabase.rpc('finalizar_venda_pdv', {
                 p_pedido_id: pedidoSelecionado.id,
                 p_forma_pagamento: formaPagamento,
                 p_valor_pago: valorPago,
@@ -232,7 +290,9 @@ export default function CaixaClient({
                 ? Math.max(Math.floor(pedidoSelecionado.total / 10), 0)
                 : 0
 
-            // Monta dados do Cupom Digital
+            // NFC-e — emite após pagamento confirmado. Falha NÃO cancela a venda.
+            const nfce = await emitirNFCe(pedidoSelecionado, formaPagamento)
+
             const recibo: DadosRecibo = {
                 pedidoId: pedidoSelecionado.id,
                 mesa: pedidoSelecionado.numero_mesa,
@@ -244,6 +304,7 @@ export default function CaixaClient({
                 formaPagamento,
                 pontosGanhos,
                 dataHora: dataHoraLocalVisual(getAgoraUTC()),
+                nfce,
             }
 
             setReciboAtual(recibo)
@@ -389,6 +450,56 @@ export default function CaixaClient({
                                     <span className="text-blue-700 font-medium flex items-center gap-1.5"><Star className="w-4 h-4" /> Pontos de Fidelidade</span>
                                     <span className="font-extrabold text-blue-700">+{reciboAtual.pontosGanhos} pts</span>
                                 </div>
+                            )}
+
+                            {/* NFC-e — Status fiscal */}
+                            {reciboAtual.nfce && (
+                                reciboAtual.nfce.ok ? (
+                                    <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2.5 space-y-1.5">
+                                        <div className="flex items-center justify-between text-sm">
+                                            <span className="text-emerald-700 font-semibold flex items-center gap-1.5">
+                                                <Receipt className="w-4 h-4" /> NFC-e emitida
+                                            </span>
+                                            {reciboAtual.nfce.danfeUrl && (
+                                                <a
+                                                    href={reciboAtual.nfce.danfeUrl}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="text-xs font-bold text-emerald-700 hover:underline"
+                                                >
+                                                    Imprimir DANFE
+                                                </a>
+                                            )}
+                                        </div>
+                                        {reciboAtual.nfce.chaveAcesso && (
+                                            <p className="text-[10px] font-mono text-emerald-700/80 break-all">
+                                                {reciboAtual.nfce.chaveAcesso}
+                                            </p>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 space-y-1.5">
+                                        <div className="flex items-center justify-between text-sm">
+                                            <span className="text-amber-700 font-semibold flex items-center gap-1.5">
+                                                <AlertTriangle className="w-4 h-4" /> NFC-e pendente
+                                            </span>
+                                            <button
+                                                onClick={handleReemitirNFCe}
+                                                className="text-xs font-bold text-amber-700 hover:underline"
+                                            >
+                                                Tentar novamente
+                                            </button>
+                                        </div>
+                                        {reciboAtual.nfce.erro && (
+                                            <p className="text-[11px] text-amber-700/80">
+                                                {reciboAtual.nfce.erro}
+                                            </p>
+                                        )}
+                                        <p className="text-[11px] text-amber-700/70">
+                                            A venda foi registrada normalmente. Apenas a NFC-e não foi emitida.
+                                        </p>
+                                    </div>
+                                )
                             )}
                         </div>
 

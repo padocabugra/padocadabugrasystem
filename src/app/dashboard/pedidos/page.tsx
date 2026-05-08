@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { PlusCircle, Truck } from 'lucide-react'
+import { PlusCircle, Truck, Zap } from 'lucide-react'
 import ListaPedidosClient from '@/components/pedidos/ListaPedidosClient'
 
 interface PedidosPageProps {
@@ -20,7 +20,7 @@ export default async function PedidosPage({ searchParams }: PedidosPageProps) {
 
     let query = supabase
         .from('pedidos')
-        .select('id, numero_mesa, total, status, tipo_pedido, created_at, cliente:clientes(nome)')
+        .select('id, numero_mesa, comanda_id, total, status, tipo_pedido, created_at, cliente:clientes(nome), comanda:comandas(numero)')
         .order('created_at', { ascending: false })
         .limit(50)
 
@@ -45,17 +45,31 @@ export default async function PedidosPage({ searchParams }: PedidosPageProps) {
                             : 'Acompanhe seus pedidos em tempo real.'}
                     </p>
                 </div>
-                <Link
-                    href={`/dashboard/pedidos/novo${isDeliveryView ? '?tipo=delivery' : ''}`}
-                    className={`h-11 px-5 rounded-xl font-semibold flex items-center gap-2 text-sm
-                                active:scale-95 transition-all touch-manipulation ${isDeliveryView
-                            ? 'bg-[#054F77] hover:bg-[#054F77]/90 text-white'
-                            : 'bg-primary text-white hover:bg-primary/90'
-                        }`}
-                >
-                    <PlusCircle className="w-4 h-4" />
-                    {isDeliveryView ? 'Novo Delivery' : 'Novo Pedido'}
-                </Link>
+                <div className="flex items-center gap-2">
+                    {!isDeliveryView && (
+                        <Link
+                            href="/dashboard/pdv"
+                            className="h-14 px-5 rounded-xl font-bold flex items-center gap-2 text-sm
+                                       bg-emerald-500 hover:bg-emerald-600 text-white
+                                       shadow-lg shadow-emerald-500/30
+                                       active:scale-95 transition-all touch-manipulation"
+                        >
+                            <Zap className="w-4 h-4 fill-white" />
+                            Venda Rápida
+                        </Link>
+                    )}
+                    <Link
+                        href={`/dashboard/pedidos/novo${isDeliveryView ? '?tipo=delivery' : ''}`}
+                        className={`h-14 px-5 rounded-xl font-semibold flex items-center gap-2 text-sm
+                                    active:scale-95 transition-all touch-manipulation ${isDeliveryView
+                                ? 'bg-[#054F77] hover:bg-[#054F77]/90 text-white'
+                                : 'bg-primary text-white hover:bg-primary/90'
+                            }`}
+                    >
+                        <PlusCircle className="w-4 h-4" />
+                        {isDeliveryView ? 'Novo Delivery' : 'Novo Pedido'}
+                    </Link>
+                </div>
             </div>
 
             {/* Listagem com Real-time */}

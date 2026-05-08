@@ -140,6 +140,14 @@ export default function ListaPedidosClient({ pedidosIniciais, filtroTipoInicial 
                                                 {pedido.numero_mesa ? `MESA ${pedido.numero_mesa}` : 'BALCÃO'}
                                             </span>
                                         )}
+                                        {pedido.comanda?.numero && (
+                                            <>
+                                                ·
+                                                <span className="font-bold text-emerald-600">
+                                                    CMD {pedido.comanda.numero}
+                                                </span>
+                                            </>
+                                        )}
                                         ·
                                         <span>
                                             {new Date(pedido.created_at).toLocaleTimeString('pt-BR', {

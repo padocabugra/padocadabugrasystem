@@ -1,6 +1,6 @@
 'use client'
 
-import { ShoppingCart, Plus, Minus, Trash2, SendHorizonal } from 'lucide-react'
+import { ShoppingCart, Plus, Minus, Trash2, SendHorizonal, ChefHat, Wallet } from 'lucide-react'
 import type { ItemCarrinho } from '@/lib/types/pedidos'
 
 interface CarrinhoLateralProps {
@@ -9,6 +9,8 @@ interface CarrinhoLateralProps {
     onRemove: (produto_id: string) => void
     onSubmit: () => void
     isSubmitting: boolean
+    destinoCozinha: boolean
+    onDestinoChange: (cozinha: boolean) => void
 }
 
 export default function CarrinhoLateral({
@@ -17,6 +19,8 @@ export default function CarrinhoLateral({
     onRemove,
     onSubmit,
     isSubmitting,
+    destinoCozinha,
+    onDestinoChange,
 }: CarrinhoLateralProps) {
     const total = itens.reduce((acc, item) => acc + item.preco * item.quantidade, 0)
 
@@ -85,23 +89,60 @@ export default function CarrinhoLateral({
                 )}
             </div>
 
-            {/* Footer: Total + Botão Enviar */}
+            {/* Footer: Total + Destino + Botão Enviar */}
             <div className="px-4 py-4 border-t border-blue-100 space-y-3 bg-white">
                 <div className="flex items-center justify-between">
                     <p className="text-sm font-medium text-gray-600">Total do Pedido</p>
                     <p className="text-xl font-extrabold text-primary">{formatBRL(total)}</p>
                 </div>
 
+                {/* Destino do pedido — segmented control */}
+                <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Destino do pedido">
+                    <button
+                        type="button"
+                        role="radio"
+                        aria-checked={destinoCozinha}
+                        onClick={() => onDestinoChange(true)}
+                        className={`min-h-[48px] rounded-xl font-bold text-sm border-2 transition-all flex items-center justify-center gap-2 touch-manipulation active:scale-95 ${destinoCozinha
+                            ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-200'
+                            : 'bg-white border-gray-200 text-gray-600 hover:border-blue-300'
+                            }`}
+                    >
+                        <ChefHat className="w-4 h-4" />
+                        Cozinha
+                    </button>
+                    <button
+                        type="button"
+                        role="radio"
+                        aria-checked={!destinoCozinha}
+                        onClick={() => onDestinoChange(false)}
+                        className={`min-h-[48px] rounded-xl font-bold text-sm border-2 transition-all flex items-center justify-center gap-2 touch-manipulation active:scale-95 ${!destinoCozinha
+                            ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-200'
+                            : 'bg-white border-gray-200 text-gray-600 hover:border-emerald-300'
+                            }`}
+                    >
+                        <Wallet className="w-4 h-4" />
+                        Direto p/ Caixa
+                    </button>
+                </div>
+
                 <button
                     onClick={onSubmit}
                     disabled={isSubmitting || itens.length === 0}
-                    className="w-full h-14 rounded-2xl bg-emerald-500 text-white font-bold text-base
+                    className={`w-full h-14 rounded-2xl text-white font-bold text-base
                                flex items-center justify-center gap-3 active:scale-95 transition-all
                                disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation
-                               shadow-lg shadow-emerald-500/30 hover:bg-emerald-600"
+                               shadow-lg ${destinoCozinha
+                                   ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/30'
+                                   : 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/30'
+                               }`}
                 >
                     <SendHorizonal className="w-5 h-5" />
-                    {isSubmitting ? 'Enviando...' : 'Enviar para Cozinha'}
+                    {isSubmitting
+                        ? 'Enviando...'
+                        : destinoCozinha
+                            ? 'Enviar para Cozinha'
+                            : 'Enviar Direto p/ Caixa'}
                 </button>
             </div>
         </div>

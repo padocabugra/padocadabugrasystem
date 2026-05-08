@@ -27,6 +27,7 @@ export interface ItemPedido {
 export interface Pedido {
     id: string
     numero_mesa: number | null       // coluna real: numero_mesa
+    comanda_id: string | null        // FK → comandas.id
     cliente_id: string | null
     vendedor_id: string | null       // coluna real: vendedor_id
     total: number                    // coluna real: total (não valor_total)
@@ -37,6 +38,7 @@ export interface Pedido {
     updated_at?: string
     itens?: ItemPedido[]
     cliente?: { nome: string }
+    comanda?: { numero: number }
 }
 
 // ─────────────────────────────────────────
@@ -55,6 +57,7 @@ export interface ItemCarrinho {
 export const criarPedidoSchema = z.object({
     cliente_id: z.string().uuid().nullable().optional(),
     numero_mesa: z.number().int().min(1).nullable().optional(),
+    comanda_id: z.string().uuid().nullable().optional(),
     vendedor_id: z.string().uuid(),
     total: z.number().min(0.01),
     tipo_pedido: z.enum(['local', 'delivery']).default('local'),

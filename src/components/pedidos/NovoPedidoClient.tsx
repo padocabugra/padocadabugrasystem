@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import BuscaClienteCPF from '@/components/pedidos/BuscaClienteCPF'
@@ -8,7 +8,12 @@ import CatalogoProdutos from '@/components/pedidos/CatalogoProdutos'
 import CarrinhoLateral from '@/components/pedidos/CarrinhoLateral'
 import type { Produto } from '@/lib/types'
 import type { ItemCarrinho, TipoPedido } from '@/lib/types/pedidos'
-import { ShoppingCart as CartIcon, MapPin, Truck, UserX } from 'lucide-react'
+import { ShoppingCart as CartIcon, MapPin, Truck, UserX, CreditCard, X } from 'lucide-react'
+
+interface Comanda {
+    id: string
+    numero: number
+}
 
 interface NovoPedidoClientProps {
     produtos: Produto[]
@@ -30,7 +35,33 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
     const [tipoPedido, setTipoPedido] = useState<TipoPedido>(tipoInicial)
     const [numeroMesa, setNumeroMesa] = useState<string>('')
     const [carrinho, setCarrinho] = useState<ItemCarrinho[]>([])
+    const [destinoCozinha, setDestinoCozinha] = useState(true)
     const [isSubmitting, setIsSubmitting] = useState(false)
+
+    // ── Comandas ──
+    const [comandasLivres, setComandasLivres] = useState<Comanda[]>([])
+    const [selectedComandaId, setSelectedComandaId] = useState<string | null>(null)
+    const [semComanda, setSemComanda] = useState(false)
+    const [loadingComandas, setLoadingComandas] = useState(false)
+
+    const supabase = createClient()
+
+    const fetchComandasLivres = useCallback(async () => {
+        setLoadingComandas(true)
+        const { data } = await supabase
+            .from('comandas')
+            .select('id, numero')
+            .eq('status', 'livre')
+            .order('numero')
+        setComandasLivres(data ?? [])
+        setLoadingComandas(false)
+    }, [supabase])
+
+    useEffect(() => {
+        if (tipoPedido === 'local') {
+            fetchComandasLivres()
+        }
+    }, [tipoPedido, fetchComandasLivres])
 
     // ── Gerenciamento do Carrinho ──
     const handleAddProduto = useCallback((produto: Produto) => {
@@ -99,13 +130,14 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
 
         setIsSubmitting(true)
 
-        const supabase = createClient()
         const { data, error } = await supabase.rpc('create_pedido_completo', {
             p_cliente_id: vendaAvulsa ? null : (cliente?.id ?? null),
             p_numero_mesa: mesa,
             p_vendedor_id: vendedorId,
             p_total: total,
             p_tipo_pedido: tipoPedido,
+            p_comanda_id: selectedComandaId,
+            p_destino_cozinha: destinoCozinha,
             p_itens: carrinho.map((i) => ({
                 produto_id: i.produto_id,
                 quantidade: i.quantidade,
@@ -121,7 +153,8 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
         }
 
         const tipoLabel = tipoPedido === 'delivery' ? '🛵 Delivery' : '🍞 Local'
-        toast.success(`Pedido ${tipoLabel} enviado para a cozinha!`, {
+        const destinoLabel = destinoCozinha ? 'enviado para a cozinha' : 'enviado direto para o caixa'
+        toast.success(`Pedido ${tipoLabel} ${destinoLabel}!`, {
             description: `Pedido #${(data as any)?.pedido_id?.slice(0, 8).toUpperCase()} criado com sucesso.`,
         })
 
@@ -129,7 +162,11 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
         setCliente(null)
         setVendaAvulsa(false)
         setNumeroMesa('')
+        setSelectedComandaId(null)
+        setSemComanda(false)
         setCarrinho([])
+        setDestinoCozinha(true)
+        fetchComandasLivres()
     }
 
     return (
@@ -155,7 +192,7 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
                         </button>
                         <button
                             type="button"
-                            onClick={() => { setTipoPedido('delivery'); setNumeroMesa('') }}
+                            onClick={() => { setTipoPedido('delivery'); setNumeroMesa(''); setSelectedComandaId(null); setSemComanda(false) }}
                             className={`flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm border-2 transition-all ${tipoPedido === 'delivery'
                                 ? 'bg-[#054F77] border-[#054F77] text-white shadow-lg shadow-blue-200'
                                 : 'bg-white border-gray-200 text-gray-600 hover:border-blue-300'
@@ -208,7 +245,83 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
                     )}
                 </div>
 
-                {/* Seção 2: Mesa (somente para pedidos locais) */}
+                {/* Seção 2: Comanda (somente para pedidos locais) */}
+                {tipoPedido === 'local' && (
+                    <div className="bg-white rounded-2xl border border-blue-100 p-4 shadow-sm">
+                        <div className="flex items-center justify-between mb-3">
+                            <p className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                                <CreditCard className="w-4 h-4 text-gray-500" />
+                                Comanda
+                            </p>
+                            {selectedComandaId && (
+                                <button
+                                    type="button"
+                                    onClick={() => { setSelectedComandaId(null); setSemComanda(false) }}
+                                    className="text-xs text-red-500 font-semibold hover:underline flex items-center gap-1"
+                                >
+                                    <X className="w-3 h-3" /> Limpar
+                                </button>
+                            )}
+                        </div>
+
+                        {semComanda ? (
+                            <div className="flex items-center justify-between py-3 px-4 bg-gray-50 rounded-xl border border-gray-200">
+                                <span className="text-sm font-bold text-gray-600">Sem comanda (balcão)</span>
+                                <button
+                                    type="button"
+                                    onClick={() => setSemComanda(false)}
+                                    className="text-xs text-blue-600 font-semibold hover:underline"
+                                >
+                                    Selecionar comanda
+                                </button>
+                            </div>
+                        ) : selectedComandaId ? (
+                            <div className="flex items-center justify-center py-3 px-4 bg-emerald-50 rounded-xl border-2 border-emerald-300">
+                                <span className="text-lg font-extrabold text-emerald-700">
+                                    Comanda #{comandasLivres.find(c => c.id === selectedComandaId)?.numero ?? '?'}
+                                </span>
+                            </div>
+                        ) : loadingComandas ? (
+                            <div className="flex items-center justify-center py-6 text-gray-400 text-sm">
+                                Carregando comandas...
+                            </div>
+                        ) : (
+                            <>
+                                <div className="grid grid-cols-5 sm:grid-cols-8 gap-2 mb-3">
+                                    {comandasLivres.map((comanda) => (
+                                        <button
+                                            key={comanda.id}
+                                            type="button"
+                                            onClick={() => { setSelectedComandaId(comanda.id); setSemComanda(false) }}
+                                            className="min-w-[60px] min-h-[60px] rounded-xl bg-emerald-50 border-2 border-emerald-300
+                                                       text-emerald-700 font-extrabold text-lg
+                                                       hover:bg-emerald-100 hover:border-emerald-400 hover:shadow-md
+                                                       active:scale-95 transition-all touch-manipulation
+                                                       flex items-center justify-center"
+                                        >
+                                            {comanda.numero}
+                                        </button>
+                                    ))}
+                                </div>
+                                {comandasLivres.length === 0 && (
+                                    <p className="text-xs text-gray-400 text-center mb-3">Nenhuma comanda livre no momento.</p>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => { setSemComanda(true); setSelectedComandaId(null) }}
+                                    className="w-full py-2.5 border-2 border-dashed border-gray-200 text-gray-500
+                                               rounded-xl text-xs font-semibold hover:border-gray-300 hover:text-gray-600
+                                               transition-colors flex items-center justify-center gap-2"
+                                >
+                                    <X className="w-3.5 h-3.5" />
+                                    Sem comanda (venda de balcão)
+                                </button>
+                            </>
+                        )}
+                    </div>
+                )}
+
+                {/* Seção 3: Mesa (somente para pedidos locais) */}
                 {tipoPedido === 'local' && (
                     <div className="bg-white rounded-2xl border border-blue-100 p-4 shadow-sm">
                         <p className="text-sm font-semibold text-gray-700 mb-3">Número da Mesa</p>
@@ -236,7 +349,7 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
                     </div>
                 )}
 
-                {/* Seção 3: Catálogo */}
+                {/* Seção 4: Catálogo */}
                 <div className="bg-white rounded-2xl border border-blue-100 p-4 shadow-sm flex-1">
                     <CatalogoProdutos
                         produtos={produtos}
@@ -253,6 +366,8 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
                     onRemove={handleRemoveById}
                     onSubmit={handleSubmit}
                     isSubmitting={isSubmitting}
+                    destinoCozinha={destinoCozinha}
+                    onDestinoChange={setDestinoCozinha}
                 />
                 {/* ── Botão Flutuante (Mobile Only) ── */}
                 {carrinho.length > 0 && (
