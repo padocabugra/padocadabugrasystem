@@ -34,6 +34,7 @@ export default async function NovoPedidoPage({ searchParams }: NovoPedidoPagePro
         .from('produtos')
         .select('id, nome, preco, categoria, descricao, ativo, estoque_atual, estoque_minimo, tipo, unidade_medida, custo, codigo, created_at, updated_at')
         .eq('ativo', true)
+        .eq('disponivel_venda', true)
         .order('categoria', { ascending: true })
         .order('nome', { ascending: true })
 

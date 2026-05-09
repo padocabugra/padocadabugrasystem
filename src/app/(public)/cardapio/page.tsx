@@ -47,6 +47,7 @@ export default async function CardapioPage() {
         .from('produtos')
         .select('id, nome, descricao, preco, categoria')
         .eq('ativo', true)
+        .eq('disponivel_venda', true)
         .order('categoria', { ascending: true })
         .order('nome', { ascending: true })
 

@@ -82,6 +82,7 @@ function makeProduto(overrides: Partial<Produto> = {}): Produto {
         estoque_minimo: 10,
         unidade_medida: 'un',
         ativo: true,
+        disponivel_venda: true,
         created_at: '2025-01-01T00:00:00Z',
         updated_at: '2025-01-01T00:00:00Z',
         ...overrides,

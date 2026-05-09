@@ -22,7 +22,7 @@ BEGIN
 
   -- Atualizar pedido
   UPDATE pedidos
-  SET status = 'finalizado',
+  SET status = 'entregue',
       forma_pagamento = p_forma_pagamento
   WHERE id = p_pedido_id;
 

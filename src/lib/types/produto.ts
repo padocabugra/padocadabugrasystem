@@ -17,6 +17,7 @@ export const produtoSchema = z.object({
     estoque_minimo: z.coerce.number().min(0, 'Estoque mínimo não pode ser negativo'),
     unidade_medida: z.string().min(1, 'Unidade é obrigatória'),
     ativo: z.boolean().default(true),
+    disponivel_venda: z.boolean().default(true),
 })
 
 export type ProdutoFormData = z.infer<typeof produtoSchema>

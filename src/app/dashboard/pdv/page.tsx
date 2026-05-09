@@ -39,6 +39,7 @@ export default async function PdvPage() {
         .from('produtos')
         .select('*')
         .eq('ativo', true)
+        .eq('disponivel_venda', true)
         .order('nome')
 
     return (

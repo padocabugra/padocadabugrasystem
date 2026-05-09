@@ -29,12 +29,14 @@ export default function ModalProduto({
         register,
         handleSubmit,
         reset,
+        watch,
         formState: { errors, isSubmitting },
         setValue,
     } = useForm<ProdutoFormData>({
         resolver: zodResolver(produtoSchema) as Resolver<ProdutoFormData>,
         defaultValues: {
             ativo: true,
+            disponivel_venda: true,
             tipo: 'proprio',
             unidade_medida: 'un',
             estoque_atual: 0,
@@ -60,10 +62,12 @@ export default function ModalProduto({
                 estoque_minimo: Number(produtoToEdit.estoque_minimo),
                 unidade_medida: produtoToEdit.unidade_medida,
                 ativo: produtoToEdit.ativo,
+                disponivel_venda: produtoToEdit.disponivel_venda ?? true,
             })
         } else {
             reset({
                 ativo: true,
+                disponivel_venda: true,
                 tipo: 'proprio',
                 unidade_medida: 'un',
                 estoque_atual: 0,
@@ -281,17 +285,36 @@ export default function ModalProduto({
                         {errors.tipo && <p className="text-xs text-red-500">{errors.tipo.message}</p>}
                     </div>
 
-                    {/* Footer: Toggle Ativo + Botões */}
-                    <div className="pt-6 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        <label className="flex items-center gap-2 cursor-pointer select-none">
-                            <div className="relative">
-                                <input type="checkbox" className="sr-only peer" {...register('ativo')} />
-                                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-                            </div>
-                            <span className="text-sm font-medium text-gray-700">Produto Ativo</span>
-                        </label>
+                    {/* Footer: Toggles + Botões */}
+                    <div className="pt-6 border-t border-gray-100 space-y-5">
+                        <div className="flex flex-col sm:flex-row sm:items-start gap-5 sm:gap-8">
+                            {/* Toggle Ativo */}
+                            <label className="flex items-center gap-2 cursor-pointer select-none">
+                                <div className="relative">
+                                    <input type="checkbox" className="sr-only peer" {...register('ativo')} />
+                                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+                                </div>
+                                <span className="text-sm font-medium text-gray-700">Produto Ativo</span>
+                            </label>
 
-                        <div className="flex items-center gap-3">
+                            {/* Toggle Disponível para venda */}
+                            <div className="flex flex-col gap-1">
+                                <label className="flex items-center gap-2 cursor-pointer select-none">
+                                    <div className="relative">
+                                        <input type="checkbox" className="sr-only peer" {...register('disponivel_venda')} />
+                                        <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-emerald-100 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                                    </div>
+                                    <span className="text-sm font-medium text-gray-700">Disponível para venda</span>
+                                </label>
+                                <span className="text-xs text-gray-500 ml-[52px]">
+                                    {watch('disponivel_venda')
+                                        ? 'Aparece para vendedores e no cardápio'
+                                        : 'Apenas estoque interno (insumo)'}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center justify-end gap-3">
                             <button
                                 type="button"
                                 onClick={onClose}
