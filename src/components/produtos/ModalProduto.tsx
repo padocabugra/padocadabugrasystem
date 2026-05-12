@@ -3,7 +3,7 @@
 import { useEffect } from 'react'
 import { useForm, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { X, Loader2, Save } from 'lucide-react'
+import { X, Loader2, Save, Trash2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import {
     produtoSchema,
@@ -309,12 +309,43 @@ export default function ModalProduto({
                                 <span className="text-xs text-gray-500 ml-[52px]">
                                     {watch('disponivel_venda')
                                         ? 'Aparece para vendedores e no cardápio'
-                                        : 'Apenas estoque interno (insumo)'}
+                                        : 'Apenas para uso interno (não aparece em vendas)'}
                                 </span>
                             </div>
                         </div>
 
                         <div className="flex items-center justify-end gap-3">
+                            {produtoToEdit && (
+                                <button
+                                    type="button"
+                                    onClick={async () => {
+                                        if (confirm(`Tem certeza que deseja excluir o produto "${produtoToEdit.nome}"?`)) {
+                                            try {
+                                                const supabase = createClient()
+                                                const { error } = await supabase.from('produtos').delete().eq('id', produtoToEdit.id)
+                                                if (error) {
+                                                    if (error.code === '23503') {
+                                                        alert('Este produto não pode ser excluído pois possui vendas ou movimentações associadas. Apenas inative-o.')
+                                                    } else {
+                                                        throw error
+                                                    }
+                                                } else {
+                                                    onSuccess()
+                                                    onClose()
+                                                }
+                                            } catch (err: unknown) {
+                                                const msg = err instanceof Error ? err.message : JSON.stringify(err)
+                                                alert('Erro ao excluir produto: ' + msg)
+                                            }
+                                        }
+                                    }}
+                                    className="px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors flex items-center gap-2 mr-auto"
+                                    disabled={isSubmitting}
+                                >
+                                    <Trash2 className="w-4 h-4" />
+                                    Excluir Produto
+                                </button>
+                            )}
                             <button
                                 type="button"
                                 onClick={onClose}

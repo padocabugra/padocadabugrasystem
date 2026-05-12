@@ -11,6 +11,8 @@ import { formatCurrency } from '@/lib/formatters'
 import { toast } from 'sonner'
 import ModalProduto from '@/components/produtos/ModalProduto'
 import type { Produto } from '@/lib/types/produto'
+import { registrarAuditLog } from '@/lib/audit-log'
+import Paginacao, { usePaginacao } from '@/components/shared/Paginacao'
 
 type FiltroEstoque = 'todos' | 'critico' | 'proprio' | 'terceirizado'
 
@@ -34,30 +36,52 @@ function ModalAjuste({
         const qtd = parseFloat(quantidade.replace(',', '.'))
         if (isNaN(qtd) || qtd <= 0) { toast.error('Informe uma quantidade válida'); return }
 
+        // MED-08: Validação — saída não pode ultrapassar estoque disponível
+        const estoqueDisponivel = Number(produto.estoque_atual)
+        if (tipo === 'saida' && qtd > estoqueDisponivel) {
+            toast.error(`Estoque insuficiente. Disponível: ${estoqueDisponivel} ${produto.unidade_medida}`)
+            return
+        }
+
         setLoading(true)
         try {
-            const delta = tipo === 'saida' ? -qtd : tipo === 'ajuste' ? qtd - Number(produto.estoque_atual) : qtd
-            const novoEstoque = Math.max(0, Number(produto.estoque_atual) + (tipo === 'ajuste' ? 0 : delta))
-            const estoqueAjustado = tipo === 'ajuste' ? qtd : novoEstoque
+            const delta = tipo === 'saida' ? -qtd : tipo === 'ajuste' ? qtd - estoqueDisponivel : qtd
+            const novoEstoque = tipo === 'ajuste' ? qtd : Math.max(0, estoqueDisponivel + delta)
 
             const { error: prodErr } = await supabase
                 .from('produtos')
-                .update({ estoque_atual: estoqueAjustado, updated_at: new Date().toISOString() })
+                .update({ estoque_atual: novoEstoque, updated_at: new Date().toISOString() })
                 .eq('id', produto.id)
             if (prodErr) throw prodErr
 
-            await supabase.from('movimentacao_estoque').insert({
+            const { error: movErr } = await supabase.from('movimentacao_estoque').insert({
                 produto_id: produto.id,
                 tipo,
                 quantidade: qtd,
                 observacao: observacao || null,
             })
+            if (movErr) console.error('[ESTOQUE] Falha ao registrar movimentação:', movErr.message)
+
+            registrarAuditLog({
+                acao: tipo === 'entrada' ? 'estoque.entrada' : tipo === 'saida' ? 'estoque.saida' : 'estoque.ajuste',
+                entidade: 'produtos',
+                entidade_id: produto.id,
+                detalhes: {
+                    produto: produto.nome,
+                    tipo,
+                    quantidade: qtd,
+                    estoqueAnterior: estoqueDisponivel,
+                    estoqueNovo: novoEstoque,
+                    observacao: observacao || undefined,
+                },
+            })
 
             toast.success('Estoque atualizado com sucesso')
             onSuccess()
             onClose()
-        } catch (err: any) {
-            toast.error('Erro ao ajustar estoque: ' + err.message)
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'Erro desconhecido'
+            toast.error('Erro ao ajustar estoque: ' + msg)
         } finally {
             setLoading(false)
         }
@@ -145,17 +169,23 @@ export default function EstoquePage() {
     const [modalEditar, setModalEditar] = useState<Produto | null>(null)
     const [modalAjuste, setModalAjuste] = useState<Produto | null>(null)
     const [isModalNovo, setIsModalNovo] = useState(false)
+    const [pagina, setPagina] = useState(1)
     const supabase = createClient()
 
     const fetchProdutos = useCallback(async () => {
         setLoading(true)
-        const { data, error } = await supabase
-            .from('produtos')
-            .select('*')
-            .order('nome', { ascending: true })
-        if (error) toast.error('Erro ao carregar estoque')
-        else setProdutos((data ?? []) as Produto[])
-        setLoading(false)
+        try {
+            const { data, error } = await supabase
+                .from('produtos')
+                .select('*')
+                .order('nome', { ascending: true })
+            if (error) throw error
+            setProdutos((data ?? []) as Produto[])
+        } catch {
+            toast.error('Erro ao carregar estoque')
+        } finally {
+            setLoading(false)
+        }
     }, [supabase])
 
     useEffect(() => { fetchProdutos() }, [fetchProdutos])
@@ -181,6 +211,18 @@ export default function EstoquePage() {
             return matchBusca && matchFiltro
         })
     }, [produtos, busca, filtro])
+
+    const { paginar, totalPaginas, totalItens, itensPorPagina } = usePaginacao(produtosFiltrados, 15)
+    const produtosPaginados = paginar(pagina)
+
+    function handleBusca(valor: string) {
+        setBusca(valor)
+        setPagina(1)
+    }
+    function handleFiltro(f: FiltroEstoque) {
+        setFiltro(f)
+        setPagina(1)
+    }
 
     const isCritico = (p: Produto) => Number(p.estoque_atual) <= Number(p.estoque_minimo)
     const pct = (p: Produto) => {
@@ -245,7 +287,7 @@ export default function EstoquePage() {
                         type="text"
                         placeholder="Buscar por nome ou categoria..."
                         value={busca}
-                        onChange={(e) => setBusca(e.target.value)}
+                        onChange={(e) => handleBusca(e.target.value)}
                         className="w-full pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 outline-none"
                     />
                 </div>
@@ -258,7 +300,7 @@ export default function EstoquePage() {
                     ] as { value: FiltroEstoque; label: string }[]).map((f) => (
                         <button
                             key={f.value}
-                            onClick={() => setFiltro(f.value)}
+                            onClick={() => handleFiltro(f.value)}
                             className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all ${filtro === f.value
                                 ? f.value === 'critico'
                                     ? 'bg-red-600 border-red-600 text-white'
@@ -299,7 +341,7 @@ export default function EstoquePage() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-50">
-                                {produtosFiltrados.map((produto) => {
+                                {produtosPaginados.map((produto) => {
                                     const critico = isCritico(produto)
                                     const nivel = pct(produto)
                                     return (
@@ -386,9 +428,13 @@ export default function EstoquePage() {
                             </tbody>
                         </table>
                     </div>
-                    <div className="px-5 py-3 border-t border-gray-50 text-xs text-gray-400">
-                        {produtosFiltrados.length} de {produtos.length} produto{produtos.length !== 1 ? 's' : ''}
-                    </div>
+                    <Paginacao
+                        paginaAtual={pagina}
+                        totalPaginas={totalPaginas}
+                        totalItens={totalItens}
+                        itensPorPagina={itensPorPagina}
+                        onMudarPagina={setPagina}
+                    />
                 </div>
             )}
 

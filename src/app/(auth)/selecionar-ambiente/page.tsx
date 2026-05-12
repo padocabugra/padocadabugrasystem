@@ -49,7 +49,7 @@ export default async function SelecionarAmbientePage() {
     const { data: usuario, error } = await supabase
         .from('usuarios')
         .select('role')
-        .eq('email', user.email!)
+        .eq('id', user.id)
         .single()
 
     if (error || !usuario) {

@@ -25,7 +25,7 @@ export default async function DashboardLayout({
     const { data: usuario, error } = await supabase
         .from('usuarios')
         .select('id, email, nome, role, ativo')
-        .eq('email', user.email!)
+        .eq('id', user.id)
         .single()
 
     // Se usuário não existir na tabela ou estiver inativo, desloga e redireciona

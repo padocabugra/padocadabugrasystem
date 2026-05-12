@@ -24,7 +24,7 @@ export default async function NovoPedidoPage({ searchParams }: NovoPedidoPagePro
     const { data: usuario, error: usuarioError } = await supabase
         .from('usuarios')
         .select('id')
-        .eq('email', user.email!)
+        .eq('id', user.id)
         .single()
 
     if (usuarioError || !usuario) redirect('/selecionar-ambiente')

@@ -18,7 +18,7 @@ export default async function CaixaPage() {
     const { data: usuario } = await supabase
         .from('usuarios')
         .select('id, nome')
-        .eq('email', user.email!)
+        .eq('id', user.id)
         .single()
 
     if (!usuario) redirect('/login')

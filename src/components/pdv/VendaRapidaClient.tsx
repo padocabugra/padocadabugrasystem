@@ -12,6 +12,7 @@ import { createClient } from '@/lib/supabase/client'
 import { formatCurrency, unformatCPF, isValidCPF } from '@/lib/formatters'
 import type { Produto } from '@/lib/types'
 import CpfNotaInput from '@/components/shared/CpfNotaInput'
+import { QRCodeSVG } from 'qrcode.react'
 
 type FormaPagamento = 'dinheiro' | 'pix' | 'debito' | 'credito'
 
@@ -62,6 +63,7 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
     const [categoriaAtiva, setCategoriaAtiva] = useState<string>('Todos')
 
     const [modalPagamento, setModalPagamento] = useState(false)
+    const [modalPix, setModalPix] = useState(false)
     const [formaPagamento, setFormaPagamento] = useState<FormaPagamento>('dinheiro')
     const [valorRecebido, setValorRecebido] = useState('')
     const [processando, setProcessando] = useState(false)
@@ -274,6 +276,7 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
 
         setCarrinho([])
         setModalPagamento(false)
+        setModalPix(false)
         setValorRecebido('')
         setFormaPagamento('dinheiro')
         setCpfNota('')
@@ -501,17 +504,66 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
 
                         <div className="px-5 py-4 bg-gray-50">
                             <button
-                                onClick={handleFinalizar}
+                                onClick={() => formaPagamento === 'pix' ? setModalPix(true) : handleFinalizar()}
                                 disabled={processando || valorInsuficiente || carrinho.length === 0}
                                 className="w-full h-14 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-base flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation shadow-lg shadow-emerald-500/30"
                             >
-                                {processando ? 'Processando...' : (
+                                {processando ? 'Processando...' : formaPagamento === 'pix' ? (
+                                    <>
+                                        <Smartphone className="w-5 h-5" />
+                                        Gerar QR Code PIX
+                                    </>
+                                ) : (
                                     <>
                                         <CheckCircle2 className="w-5 h-5" />
                                         Confirmar Venda
                                     </>
                                 )}
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── Modal PIX ── */}
+            {modalPix && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in-0 zoom-in-95 text-center">
+                        <div className="px-6 pt-6 pb-4 bg-gradient-to-br from-emerald-500 to-emerald-600 text-white">
+                            <h2 className="text-lg font-bold flex items-center justify-center gap-2">
+                                <Smartphone className="w-5 h-5" /> Pagamento via PIX
+                            </h2>
+                            <p className="text-emerald-100 text-sm mt-1">Aguardando pagamento do cliente</p>
+                        </div>
+                        <div className="p-6 flex flex-col items-center">
+                            <div className="bg-white p-3 rounded-xl border-2 border-emerald-100 shadow-sm mb-4 inline-block">
+                                <QRCodeSVG
+                                    value={`00020126580014br.gov.bcb.pix0136${vendedorId}520400005303986540${total.toFixed(2).length < 10 ? '0' : ''}${total.toFixed(2).length}${total.toFixed(2)}5802BR5915Padoca CRM6008BRASILIA62070503***6304`}
+                                    size={180}
+                                    level="M"
+                                    includeMargin={false}
+                                />
+                            </div>
+                            <p className="text-sm text-gray-500 mb-1">Total a Pagar</p>
+                            <p className="text-3xl font-black text-gray-900 mb-6">{formatCurrency(total)}</p>
+                            
+                            <div className="flex w-full gap-3">
+                                <button
+                                    onClick={() => setModalPix(false)}
+                                    disabled={processando}
+                                    className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold text-sm transition-all active:scale-[0.98]"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    onClick={handleFinalizar}
+                                    disabled={processando}
+                                    className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                                >
+                                    {processando ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                                    Confirmar
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

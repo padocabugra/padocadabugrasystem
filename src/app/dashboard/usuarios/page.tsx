@@ -12,7 +12,7 @@ export default async function UsuariosPage() {
     const { data: usuario } = await supabase
         .from('usuarios')
         .select('role')
-        .eq('email', user.email!)
+        .eq('id', user.id)
         .single()
 
     if (!usuario || usuario.role !== 'admin') {

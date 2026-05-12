@@ -19,6 +19,7 @@ import {
     LogOut,
     FlaskConical,
     Store,
+    ScrollText,
 } from 'lucide-react'
 import type { Usuario, NavItem } from '@/lib/types'
 import { NAV_ITEMS } from '@/lib/types'
@@ -36,6 +37,7 @@ const ICON_MAP: Record<string, React.ElementType> = {
     '/dashboard/producao/receitas': FlaskConical,
     '/dashboard/caixa': DollarSign,
     '/dashboard/configuracoes': Settings,
+    '/dashboard/audit-log': ScrollText,
 }
 
 interface MobileHeaderProps {

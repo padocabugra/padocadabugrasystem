@@ -19,6 +19,7 @@ import {
     Store,
     ChevronLeft,
     ChevronRight,
+    ScrollText,
 } from 'lucide-react'
 import type { Usuario, NavItem, UserRole } from '@/lib/types'
 import { NAV_ITEMS } from '@/lib/types'
@@ -36,6 +37,7 @@ const ICON_MAP: Record<string, React.ElementType> = {
     '/dashboard/producao/receitas': FlaskConical,
     '/dashboard/caixa': DollarSign,
     '/dashboard/configuracoes': Settings,
+    '/dashboard/audit-log': ScrollText,
 }
 
 const ROLE_LABELS: Record<UserRole, string> = {

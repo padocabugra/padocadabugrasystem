@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { createBrowserClient } from '@supabase/ssr'
 import { toast } from 'sonner'
 import {
     UserCog, Plus, X, Loader2, Save, Search,
@@ -10,6 +9,8 @@ import {
     ToggleLeft, ToggleRight, Mail, User, KeyRound,
 } from 'lucide-react'
 import type { UserRole } from '@/lib/types'
+import { registrarAuditLog } from '@/lib/audit-log'
+import Paginacao, { usePaginacao } from '@/components/shared/Paginacao'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -55,7 +56,6 @@ function ModalAdicionarUsuario({
     const [senha, setSenha] = useState('')
     const [role, setRole] = useState<UserRole>('vendedor')
     const [saving, setSaving] = useState(false)
-    const supabase = createClient()
 
     async function handleCriar() {
         if (!nome.trim()) { toast.error('Informe o nome do funcionário'); return }
@@ -64,49 +64,36 @@ function ModalAdicionarUsuario({
 
         setSaving(true)
         try {
-            // Cria um client temporário isolado, SEM persistência de sessão, 
-            // evitando que o Admin atual seja deslogado durante o signUp.
-            const tempSupabase = createBrowserClient(
-                process.env.NEXT_PUBLIC_SUPABASE_URL!,
-                process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-                {
-                    auth: {
-                        persistSession: false,
-                        autoRefreshToken: false,
-                    }
-                }
-            )
-            
-            const { data: authData, error: authError } = await tempSupabase.auth.signUp({
-                email: email.trim(),
-                password: senha,
-                options: {
-                    data: { nome: nome.trim(), role },
-                },
+            // Criação server-side via API Route segura (valida admin no server)
+            const res = await fetch('/api/usuarios', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    nome: nome.trim(),
+                    email: email.trim(),
+                    senha,
+                    role,
+                }),
             })
 
-            if (authError) throw authError
-            if (!authData.user) throw new Error('Falha ao criar usuário na autenticação')
+            const json = await res.json()
 
-            const { error: dbError } = await supabase
-                .from('usuarios')
-                .insert({
-                    id: authData.user.id,
-                    email: email.trim(),
-                    nome: nome.trim(),
-                    role,
-                    ativo: true,
-                })
-
-            if (dbError) throw dbError
+            if (!res.ok) {
+                throw new Error(json.erro || 'Erro ao criar funcionário')
+            }
 
             toast.success(`Funcionário "${nome.trim()}" criado com sucesso!`)
+
+            registrarAuditLog({
+                acao: 'usuario.criar',
+                entidade: 'usuarios',
+                detalhes: { nome: nome.trim(), email: email.trim(), role },
+            })
+
             onSuccess()
             onClose()
-        } catch (err: any) {
-            const msg = err.message?.includes('already registered')
-                ? 'Este email já está cadastrado'
-                : err.message || 'Erro ao criar funcionário'
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'Erro ao criar funcionário'
             toast.error(msg)
         } finally {
             setSaving(false)
@@ -179,24 +166,41 @@ export default function UsuariosClient() {
     const [loading, setLoading] = useState(true)
     const [modalOpen, setModalOpen] = useState(false)
     const [busca, setBusca] = useState('')
+    const [pagina, setPagina] = useState(1)
     const supabase = createClient()
 
     const fetchUsuarios = useCallback(async () => {
         setLoading(true)
-        const { data, error } = await supabase.from('usuarios').select('id, email, nome, role, ativo, created_at').order('nome')
-        if (error) toast.error('Erro ao carregar usuários')
-        else setUsuarios(data ?? [])
-        setLoading(false)
+        try {
+            const { data, error } = await supabase.from('usuarios').select('id, email, nome, role, ativo, created_at').order('nome')
+            if (error) throw error
+            setUsuarios(data ?? [])
+        } catch {
+            toast.error('Erro ao carregar usuários')
+        } finally {
+            setLoading(false)
+        }
     }, [supabase])
 
     useEffect(() => { fetchUsuarios() }, [fetchUsuarios])
 
     async function toggleAtivo(id: string, ativoAtual: boolean) {
-        const { error } = await supabase.from('usuarios').update({ ativo: !ativoAtual, updated_at: new Date().toISOString() }).eq('id', id)
-        if (error) toast.error('Erro ao atualizar status')
-        else {
+        try {
+            const { error } = await supabase.from('usuarios').update({ ativo: !ativoAtual, updated_at: new Date().toISOString() }).eq('id', id)
+            if (error) throw error
+
+            const usuario = usuarios.find(u => u.id === id)
+            registrarAuditLog({
+                acao: ativoAtual ? 'usuario.desativar' : 'usuario.ativar',
+                entidade: 'usuarios',
+                entidade_id: id,
+                detalhes: { nome: usuario?.nome, email: usuario?.email },
+            })
+
             toast.success(ativoAtual ? 'Usuário desativado' : 'Usuário ativado')
             setUsuarios((prev) => prev.map((u) => (u.id === id ? { ...u, ativo: !ativoAtual } : u)))
+        } catch {
+            toast.error('Erro ao atualizar status')
         }
     }
 
@@ -204,6 +208,15 @@ export default function UsuariosClient() {
         const termo = busca.toLowerCase()
         return u.nome.toLowerCase().includes(termo) || u.email.toLowerCase().includes(termo) || u.role.toLowerCase().includes(termo)
     })
+
+    const { paginar, totalPaginas, totalItens, itensPorPagina } = usePaginacao(filtrados, 10)
+    const usuariosPaginados = paginar(pagina)
+
+    // Reset page quando busca muda
+    function handleBusca(valor: string) {
+        setBusca(valor)
+        setPagina(1)
+    }
 
     return (
         <div className="space-y-5">
@@ -220,7 +233,7 @@ export default function UsuariosClient() {
             </div>
             <div className="relative max-w-sm">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input type="text" placeholder="Buscar por nome, email ou cargo..." value={busca} onChange={(e) => setBusca(e.target.value)} className="w-full pl-10 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-200 outline-none bg-white" />
+                <input type="text" placeholder="Buscar por nome, email ou cargo..." value={busca} onChange={(e) => handleBusca(e.target.value)} className="w-full pl-10 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-200 outline-none bg-white" />
             </div>
             {loading ? (
                 <div className="flex justify-center py-16"><div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" /></div>
@@ -240,7 +253,7 @@ export default function UsuariosClient() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
-                                {filtrados.map((u) => (
+                                {usuariosPaginados.map((u) => (
                                     <tr key={u.id} className={`hover:bg-gray-50/50 transition-colors ${!u.ativo ? 'opacity-50' : ''}`}>
                                         <td className="px-5 py-3.5"><p className="font-semibold text-gray-800">{u.nome}</p></td>
                                         <td className="px-5 py-3.5 text-gray-500">{u.email}</td>
@@ -260,6 +273,13 @@ export default function UsuariosClient() {
                             </tbody>
                         </table>
                     </div>
+                    <Paginacao
+                        paginaAtual={pagina}
+                        totalPaginas={totalPaginas}
+                        totalItens={totalItens}
+                        itensPorPagina={itensPorPagina}
+                        onMudarPagina={setPagina}
+                    />
                 </div>
             )}
             {modalOpen && <ModalAdicionarUsuario onClose={() => setModalOpen(false)} onSuccess={fetchUsuarios} />}

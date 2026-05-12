@@ -12,6 +12,8 @@ import {
 import { dataHoraLocalVisual, getAgoraUTC } from '@/lib/timezone'
 import { unformatCPF, isValidCPF } from '@/lib/formatters'
 import CpfNotaInput from '@/components/shared/CpfNotaInput'
+import { registrarAuditLog } from '@/lib/audit-log'
+import { QRCodeSVG } from 'qrcode.react'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -114,6 +116,7 @@ export default function CaixaClient({
     const [formaPagamento, setFormaPagamento] = useState<FormaPagamento>('dinheiro')
     const [valorRecebido, setValorRecebido] = useState('')
     const [processandoVenda, setProcessandoVenda] = useState(false)
+    const [processandoCancelamento, setProcessandoCancelamento] = useState(false)
     const [carregandoPedidos, setCarregandoPedidos] = useState(false)
 
     // Modal Cupom Digital
@@ -128,34 +131,42 @@ export default function CaixaClient({
     const [obsMovimentacao, setObsMovimentacao] = useState('')
     const [processandoMov, setProcessandoMov] = useState(false)
 
+    // Modal PIX
+    const [modalPix, setModalPix] = useState(false)
+
     // ── Carregar pedidos prontos ──────────────────────────────────────────────
 
     const carregarPedidosProntos = useCallback(async () => {
         setCarregandoPedidos(true)
-        const { data, error } = await supabase
-            .from('pedidos')
-            .select(`
-                id, numero_mesa, total, status, created_at,
-                cliente:clientes ( nome ),
-                itens_pedido (
-                    id, quantidade, preco_unitario, subtotal,
-                    produto:produtos ( nome )
-                )
-            `)
-            .eq('status', 'pronto')
-            .order('created_at', { ascending: true })
+        try {
+            const { data, error } = await supabase
+                .from('pedidos')
+                .select(`
+                    id, numero_mesa, total, status, created_at,
+                    cliente:clientes ( nome ),
+                    itens_pedido (
+                        id, quantidade, preco_unitario, subtotal,
+                        produto:produtos ( nome )
+                    )
+                `)
+                .eq('status', 'pronto')
+                .order('created_at', { ascending: true })
 
-        if (error) {
-            toast.error('Erro ao carregar pedidos')
-        } else {
-            setPedidos((data ?? []) as any)
-            // Se o pedido selecionado foi finalizado, limpa seleção
-            if (pedidoSelecionado) {
-                const ainda = (data ?? []).find((p: any) => p.id === pedidoSelecionado.id)
-                if (!ainda) setPedidoSelecionado(null)
+            if (error) {
+                toast.error('Erro ao carregar pedidos')
+            } else {
+                setPedidos((data ?? []) as PedidoPDV[])
+                // Se o pedido selecionado foi finalizado, limpa seleção
+                if (pedidoSelecionado) {
+                    const ainda = (data ?? []).find((p) => p.id === pedidoSelecionado.id)
+                    if (!ainda) setPedidoSelecionado(null)
+                }
             }
+        } catch {
+            toast.error('Falha ao buscar pedidos prontos')
+        } finally {
+            setCarregandoPedidos(false)
         }
-        setCarregandoPedidos(false)
     }, [pedidoSelecionado, supabase])
 
     // Polling a cada 30s para atualizar pedidos prontos
@@ -208,8 +219,18 @@ export default function CaixaClient({
             setSaldoAtual(data.saldo)
             setModalAbertura(false)
             toast.success(`Caixa aberto com fundo de ${formatCurrency(valor)}`)
-        } catch (err: any) {
-            toast.error('Erro ao abrir caixa: ' + err.message)
+
+            registrarAuditLog({
+                acao: 'caixa.abertura',
+                entidade: 'caixa',
+                entidade_id: data.id,
+                detalhes: { valor, usuario: usuarioNome },
+                usuario_id: usuarioId,
+                usuario_nome: usuarioNome,
+            })
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'Erro desconhecido'
+            toast.error('Erro ao abrir caixa: ' + msg)
         } finally {
             setProcessandoAbertura(false)
         }
@@ -248,8 +269,8 @@ export default function CaixaClient({
                 })
             }
             return json
-        } catch (err: any) {
-            const msg = err?.message ?? 'erro de rede'
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'erro de rede'
             toast.warning('Venda registrada, mas NFC-e falhou', { description: msg })
             return { ok: false, erro: msg }
         }
@@ -294,7 +315,15 @@ export default function CaixaClient({
 
             if (error) throw error
 
-            setSaldoAtual((prev) => prev + pedidoSelecionado.total)
+            // MED-06 FIX: Busca saldo atualizado do banco ao invés de calcular no client
+            const { data: saldoRow } = await supabase
+                .from('caixa')
+                .select('saldo')
+                .eq('usuario_id', usuarioId)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .single()
+            if (saldoRow) setSaldoAtual(saldoRow.saldo)
 
             // Calcula pontos de fidelidade (mesma lógica do trigger: floor(total / 10))
             const pontosGanhos = pedidoSelecionado.cliente
@@ -319,16 +348,63 @@ export default function CaixaClient({
                 cpfCliente: cpfNota,
             }
 
+            registrarAuditLog({
+                acao: 'caixa.venda',
+                entidade: 'pedidos',
+                entidade_id: pedidoSelecionado.id,
+                detalhes: {
+                    total: pedidoSelecionado.total,
+                    formaPagamento,
+                    valorPago,
+                    mesa: pedidoSelecionado.numero_mesa,
+                    cliente: pedidoSelecionado.cliente?.nome,
+                },
+                usuario_id: usuarioId,
+                usuario_nome: usuarioNome,
+            })
+
             setReciboAtual(recibo)
             setPedidoSelecionado(null)
             setFormaPagamento('dinheiro')
             setValorRecebido('')
             setCpfNota('')
+            setModalPix(false)
             await carregarPedidosProntos()
-        } catch (err: any) {
-            toast.error('Erro ao finalizar venda: ' + err.message)
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'Erro desconhecido'
+            toast.error('Erro ao finalizar venda: ' + msg)
         } finally {
             setProcessandoVenda(false)
+        }
+    }
+
+    async function handleCancelarPedido(id: string) {
+        if (!confirm('Deseja realmente cancelar este pedido? Ele será removido do caixa e os relatórios não o contabilizarão.')) return
+        setProcessandoCancelamento(true)
+        try {
+            const { error } = await supabase
+                .from('pedidos')
+                .update({ status: 'cancelado' })
+                .eq('id', id)
+
+            if (error) throw error
+            toast.success('Pedido cancelado com sucesso')
+            
+            registrarAuditLog({
+                acao: 'pedido.cancelamento' as any,
+                entidade: 'pedidos',
+                entidade_id: id,
+                detalhes: { motivo: 'Cancelado via Caixa/PDV' },
+                usuario_id: usuarioId,
+                usuario_nome: usuarioNome,
+            })
+
+            setPedidoSelecionado(null)
+            await carregarPedidosProntos()
+        } catch (err: unknown) {
+            toast.error('Erro ao cancelar pedido: ' + (err instanceof Error ? err.message : 'Erro desconhecido'))
+        } finally {
+            setProcessandoCancelamento(false)
         }
     }
 
@@ -343,9 +419,25 @@ export default function CaixaClient({
         }
         setProcessandoMov(true)
         try {
+            // MED-06 FIX: Busca saldo real antes de calcular para evitar inconsistência por concorrência
+            const { data: saldoRow } = await supabase
+                .from('caixa')
+                .select('saldo')
+                .eq('usuario_id', usuarioId)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .single()
+            const saldoReal = saldoRow?.saldo ?? saldoAtual
+
+            if (modalMovimentacao === 'sangria' && valor > saldoReal) {
+                toast.error(`Saldo insuficiente. Disponível: ${formatCurrency(saldoReal)}`)
+                setProcessandoMov(false)
+                return
+            }
+
             const novoSaldo = modalMovimentacao === 'sangria'
-                ? saldoAtual - valor
-                : saldoAtual + valor
+                ? saldoReal - valor
+                : saldoReal + valor
 
             const { error } = await supabase.from('caixa').insert({
                 usuario_id: usuarioId,
@@ -357,6 +449,16 @@ export default function CaixaClient({
 
             if (error) throw error
             setSaldoAtual(novoSaldo)
+
+            const tipoAcao = modalMovimentacao === 'sangria' ? 'caixa.sangria' : 'caixa.reforco' as const
+            registrarAuditLog({
+                acao: tipoAcao,
+                entidade: 'caixa',
+                detalhes: { valor, saldoAnterior: saldoReal, saldoNovo: novoSaldo, observacao: obsMovimentacao },
+                usuario_id: usuarioId,
+                usuario_nome: usuarioNome,
+            })
+
             toast.success(
                 modalMovimentacao === 'sangria'
                     ? `Sangria de ${formatCurrency(valor)} registrada`
@@ -365,8 +467,9 @@ export default function CaixaClient({
             setModalMovimentacao(null)
             setValorMovimentacao('')
             setObsMovimentacao('')
-        } catch (err: any) {
-            toast.error('Erro: ' + err.message)
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'Erro desconhecido'
+            toast.error('Erro: ' + msg)
         } finally {
             setProcessandoMov(false)
         }
@@ -633,6 +736,50 @@ export default function CaixaClient({
                 </div>
             )}
 
+            {/* ── Modal PIX ── */}
+            {modalPix && pedidoSelecionado && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in-0 zoom-in-95 text-center">
+                        <div className="px-6 pt-6 pb-4 bg-gradient-to-br from-emerald-500 to-emerald-600 text-white">
+                            <h2 className="text-lg font-bold flex items-center justify-center gap-2">
+                                <Smartphone className="w-5 h-5" /> Pagamento via PIX
+                            </h2>
+                            <p className="text-emerald-100 text-sm mt-1">Aguardando pagamento do cliente</p>
+                        </div>
+                        <div className="p-6 flex flex-col items-center">
+                            <div className="bg-white p-3 rounded-xl border-2 border-emerald-100 shadow-sm mb-4 inline-block">
+                                <QRCodeSVG
+                                    value={`00020126580014br.gov.bcb.pix0136${usuarioId}520400005303986540${pedidoSelecionado.total.toFixed(2).length < 10 ? '0' : ''}${pedidoSelecionado.total.toFixed(2).length}${pedidoSelecionado.total.toFixed(2)}5802BR5915Padoca CRM6008BRASILIA62070503***6304`}
+                                    size={180}
+                                    level="M"
+                                    includeMargin={false}
+                                />
+                            </div>
+                            <p className="text-sm text-gray-500 mb-1">Total a Pagar</p>
+                            <p className="text-3xl font-black text-gray-900 mb-6">{formatCurrency(pedidoSelecionado.total)}</p>
+                            
+                            <div className="flex w-full gap-3">
+                                <button
+                                    onClick={() => setModalPix(false)}
+                                    disabled={processandoVenda}
+                                    className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold text-sm transition-all active:scale-[0.98]"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    onClick={handleFinalizarVenda}
+                                    disabled={processandoVenda}
+                                    className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                                >
+                                    {processandoVenda ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                                    Confirmar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* ── Layout Principal ── */}
             <div className="flex flex-col h-[calc(100vh-theme(spacing.16)-theme(spacing.12))] gap-0 -m-3 sm:-m-4 lg:-m-6">
 
@@ -798,12 +945,22 @@ export default function CaixaClient({
                                             Aguardando há {tempoDecorrido(pedidoSelecionado.created_at)}
                                         </p>
                                     </div>
-                                    <button
-                                        onClick={() => setPedidoSelecionado(null)}
-                                        className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
-                                    >
-                                        <X className="w-4 h-4" />
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={() => handleCancelarPedido(pedidoSelecionado.id)}
+                                            disabled={processandoCancelamento}
+                                            className="px-2.5 py-1.5 text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors flex items-center gap-1 disabled:opacity-50"
+                                        >
+                                            {processandoCancelamento ? <RefreshCw className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />}
+                                            Cancelar Pedido
+                                        </button>
+                                        <button
+                                            onClick={() => setPedidoSelecionado(null)}
+                                            className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
+                                        >
+                                            <X className="w-4 h-4" />
+                                        </button>
+                                    </div>
                                 </div>
 
                                 {/* Itens do Pedido */}
@@ -910,16 +1067,18 @@ export default function CaixaClient({
 
                                     {/* Botão Finalizar */}
                                     <button
-                                        onClick={handleFinalizarVenda}
+                                        onClick={() => formaPagamento === 'pix' ? setModalPix(true) : handleFinalizarVenda()}
                                         disabled={
                                             processandoVenda ||
                                             !aberturaHoje ||
-                                            (formaPagamento === 'dinheiro' && (valorRecebidoNum < pedidoSelecionado.total || !valorRecebido))
+                                            (formaPagamento === 'dinheiro' && valorRecebidoNum < pedidoSelecionado.total)
                                         }
                                         className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-2xl font-extrabold text-base transition-all active:scale-[0.98] shadow-sm flex items-center justify-center gap-2 disabled:cursor-not-allowed"
                                     >
                                         {processandoVenda ? (
                                             <><RefreshCw className="w-5 h-5 animate-spin" /> Processando...</>
+                                        ) : formaPagamento === 'pix' ? (
+                                            <><Smartphone className="w-5 h-5" /> Gerar QR Code PIX</>
                                         ) : (
                                             <><CheckCircle2 className="w-5 h-5" /> Finalizar Venda</>
                                         )}

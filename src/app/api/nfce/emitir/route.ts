@@ -2,8 +2,39 @@ import { NextResponse } from 'next/server'
 import { emitirNFCe, type ItemNFCe } from '@/lib/brasilnfe'
 import { createClient } from '@/lib/supabase/server'
 
+// Formas de pagamento válidas — rejeita qualquer outra
+const FORMAS_VALIDAS = new Set(['dinheiro', 'credito', 'debito', 'pix'])
+
 export async function POST(req: Request) {
     try {
+        // ── Autenticação obrigatória ──────────────────────────────────
+        const supabase = await createClient()
+        const {
+            data: { user },
+        } = await supabase.auth.getUser()
+
+        if (!user) {
+            return NextResponse.json(
+                { ok: false, erro: 'Não autorizado. Faça login novamente.' },
+                { status: 401 }
+            )
+        }
+
+        // ── Autorização — somente admin e caixa ──────────────────────
+        const { data: usuario } = await supabase
+            .from('usuarios')
+            .select('role')
+            .eq('id', user.id)
+            .single()
+
+        if (!usuario || !['admin', 'caixa'].includes(usuario.role)) {
+            return NextResponse.json(
+                { ok: false, erro: 'Permissão insuficiente para emitir NFC-e.' },
+                { status: 403 }
+            )
+        }
+
+        // ── Validação de payload ─────────────────────────────────────
         const body = await req.json()
         const { pedidoId, itens, total, formaPagamento, cpfCliente } = body ?? {}
 
@@ -14,6 +45,21 @@ export async function POST(req: Request) {
             )
         }
 
+        if (!FORMAS_VALIDAS.has(formaPagamento)) {
+            return NextResponse.json(
+                { ok: false, erro: 'Forma de pagamento inválida.' },
+                { status: 400 }
+            )
+        }
+
+        if (typeof total !== 'number' || total <= 0) {
+            return NextResponse.json(
+                { ok: false, erro: 'Total deve ser um número positivo.' },
+                { status: 400 }
+            )
+        }
+
+        // ── Emissão NFC-e ────────────────────────────────────────────
         const resultado = await emitirNFCe({
             itens: itens as ItemNFCe[],
             total: Number(total),
@@ -21,8 +67,8 @@ export async function POST(req: Request) {
             cpfCliente: cpfCliente || undefined,
         })
 
-        if (pedidoId) {
-            const supabase = await createClient()
+        // ── Atualiza pedido com status fiscal ────────────────────────
+        if (pedidoId && typeof pedidoId === 'string') {
             await supabase
                 .from('pedidos')
                 .update({
@@ -33,9 +79,10 @@ export async function POST(req: Request) {
         }
 
         return NextResponse.json(resultado)
-    } catch (err: any) {
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Erro interno na emissão de NFC-e.'
         return NextResponse.json(
-            { ok: false, erro: err?.message ?? 'Erro interno na emissão de NFC-e.' },
+            { ok: false, erro: message },
             { status: 500 }
         )
     }

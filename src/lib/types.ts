@@ -72,4 +72,9 @@ export const NAV_ITEMS: NavItem[] = [
         href: '/dashboard/configuracoes',
         roles: ['admin'],
     },
+    {
+        label: 'Audit Log',
+        href: '/dashboard/audit-log',
+        roles: ['admin'],
+    },
 ]

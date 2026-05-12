@@ -132,7 +132,7 @@ export default function ProdutosPage() {
                 {([
                     { value: 'todos' as const, label: 'Todos' },
                     { value: 'venda' as const, label: 'Para venda' },
-                    { value: 'insumo' as const, label: 'Insumos' },
+                    { value: 'insumo' as const, label: 'Uso Interno' },
                 ]).map((f) => (
                     <button
                         key={f.value}
@@ -185,7 +185,7 @@ export default function ProdutosPage() {
                                                 <span>{produto.nome}</span>
                                                 {produto.disponivel_venda === false && (
                                                     <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-gray-200 text-gray-600">
-                                                        Insumo
+                                                        Uso Interno
                                                     </span>
                                                 )}
                                             </div>
@@ -233,7 +233,7 @@ export default function ProdutosPage() {
                                                 type="button"
                                                 onClick={(e) => handleToggleDisponivel(produto, e)}
                                                 disabled={togglingId === produto.id}
-                                                title={produto.disponivel_venda !== false ? 'Disponível para venda — clique para marcar como insumo' : 'Insumo — clique para disponibilizar'}
+                                                title={produto.disponivel_venda !== false ? 'Disponível para venda — clique para marcar como uso interno' : 'Uso interno — clique para disponibilizar'}
                                                 className="relative inline-flex disabled:opacity-50"
                                             >
                                                 <span
