@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import {
     Search, Plus, Minus, Trash2, ShoppingCart, Package,
     Banknote, Smartphone, CreditCard, X, Zap, Lock, CheckCircle2,
-    Receipt, AlertTriangle,
+    Receipt, AlertTriangle, RefreshCw,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency, unformatCPF, isValidCPF } from '@/lib/formatters'

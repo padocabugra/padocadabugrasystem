@@ -155,7 +155,22 @@ export default function CaixaClient({
             if (error) {
                 toast.error('Erro ao carregar pedidos')
             } else {
-                setPedidos((data ?? []) as PedidoPDV[])
+                const pedidosNormalizados: PedidoPDV[] = (data ?? []).map((p) => ({
+                    id: p.id,
+                    numero_mesa: p.numero_mesa,
+                    total: p.total,
+                    status: p.status,
+                    created_at: p.created_at,
+                    cliente: Array.isArray(p.cliente) ? (p.cliente[0] ?? null) : p.cliente,
+                    itens_pedido: (p.itens_pedido ?? []).map((i: any) => ({
+                        id: i.id,
+                        quantidade: i.quantidade,
+                        preco_unitario: i.preco_unitario,
+                        subtotal: i.subtotal,
+                        produto: Array.isArray(i.produto) ? (i.produto[0] ?? null) : i.produto,
+                    })),
+                }))
+                setPedidos(pedidosNormalizados)
                 // Se o pedido selecionado foi finalizado, limpa seleção
                 if (pedidoSelecionado) {
                     const ainda = (data ?? []).find((p) => p.id === pedidoSelecionado.id)
