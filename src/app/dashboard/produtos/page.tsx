@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import { Plus, Search, Archive, Package } from 'lucide-react'
+import { Plus, Search, Archive, Package, FileCheck, AlertCircle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useDebounce } from '@/hooks/useDebounce'
 import { formatCurrency } from '@/lib/formatters'
@@ -186,6 +186,22 @@ export default function ProdutosPage() {
                                                 {produto.disponivel_venda === false && (
                                                     <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-gray-200 text-gray-600">
                                                         Uso Interno
+                                                    </span>
+                                                )}
+                                                {/* Indicador fiscal */}
+                                                {produto.ncm ? (
+                                                    <span
+                                                        title={`NCM: ${produto.ncm} | CFOP: ${produto.cfop || '5101'}`}
+                                                        className="inline-flex items-center text-emerald-600 cursor-default"
+                                                    >
+                                                        <FileCheck className="w-3.5 h-3.5" />
+                                                    </span>
+                                                ) : (
+                                                    <span
+                                                        title="Dados fiscais pendentes — usando padrão (NCM: 21069090, CFOP: 5101/5102)"
+                                                        className="inline-flex items-center text-amber-400 cursor-default"
+                                                    >
+                                                        <AlertCircle className="w-3.5 h-3.5" />
                                                     </span>
                                                 )}
                                             </div>

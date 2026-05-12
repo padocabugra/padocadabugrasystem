@@ -1,15 +1,17 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { X, Loader2, Save, Trash2 } from 'lucide-react'
+import { X, Loader2, Save, Trash2, ChevronDown, ChevronRight } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import {
     produtoSchema,
     type ProdutoFormData,
     type Produto,
     UNIDADES_MEDIDA,
+    CFOP_OPTIONS,
+    CSOSN_OPTIONS,
 } from '@/lib/types/produto'
 
 interface ModalProdutoProps {
@@ -25,6 +27,8 @@ export default function ModalProduto({
     onSuccess,
     produtoToEdit,
 }: ModalProdutoProps) {
+    const [fiscalAberto, setFiscalAberto] = useState(false)
+
     const {
         register,
         handleSubmit,
@@ -44,12 +48,28 @@ export default function ModalProduto({
             preco: 0,
             custo: 0,
             codigo: '',
+            ncm: '',
+            cfop: '5101',
+            csosn: '0102',
         },
     })
+
+    const tipoAtual = watch('tipo')
+
+    // Quando tipo muda, sincroniza CFOP automaticamente
+    useEffect(() => {
+        if (tipoAtual === 'proprio') {
+            setValue('cfop', '5101')
+        } else {
+            setValue('cfop', '5102')
+        }
+    }, [tipoAtual, setValue])
 
     // Popula formulário na edição
     useEffect(() => {
         if (produtoToEdit) {
+            const temDadosFiscais = !!(produtoToEdit.ncm || produtoToEdit.cfop || produtoToEdit.csosn)
+            setFiscalAberto(temDadosFiscais)
             reset({
                 nome: produtoToEdit.nome,
                 codigo: produtoToEdit.codigo || '',
@@ -63,8 +83,12 @@ export default function ModalProduto({
                 unidade_medida: produtoToEdit.unidade_medida,
                 ativo: produtoToEdit.ativo,
                 disponivel_venda: produtoToEdit.disponivel_venda ?? true,
+                ncm: produtoToEdit.ncm || '',
+                cfop: produtoToEdit.cfop || (produtoToEdit.tipo === 'terceirizado' ? '5102' : '5101'),
+                csosn: produtoToEdit.csosn || '0102',
             })
         } else {
+            setFiscalAberto(false)
             reset({
                 ativo: true,
                 disponivel_venda: true,
@@ -75,6 +99,9 @@ export default function ModalProduto({
                 preco: 0,
                 custo: 0,
                 codigo: '',
+                ncm: '',
+                cfop: '5101',
+                csosn: '0102',
             })
         }
     }, [produtoToEdit, reset, isOpen])
@@ -83,25 +110,24 @@ export default function ModalProduto({
         try {
             const supabase = createClient()
 
+            // Normaliza NCM — remove espaços, garante string ou null
+            const ncmLimpo = data.ncm?.replace(/\D/g, '').slice(0, 8) || null
+
+            const payload = {
+                ...data,
+                ncm: ncmLimpo,
+                cfop: data.cfop || null,
+                csosn: data.csosn || null,
+            }
+
             if (produtoToEdit) {
-                // Atualização
                 const { error } = await supabase
                     .from('produtos')
-                    .update({
-                        ...data,
-                        updated_at: new Date().toISOString(),
-                    })
+                    .update({ ...payload, updated_at: new Date().toISOString() })
                     .eq('id', produtoToEdit.id)
-
                 if (error) throw error
             } else {
-                // Criação
-                const { error } = await supabase.from('produtos').insert([
-                    {
-                        ...data,
-                    },
-                ])
-
+                const { error } = await supabase.from('produtos').insert([payload])
                 if (error) throw error
             }
 
@@ -283,6 +309,91 @@ export default function ModalProduto({
                             </label>
                         </div>
                         {errors.tipo && <p className="text-xs text-red-500">{errors.tipo.message}</p>}
+                    </div>
+
+                    {/* ── Seção: Dados Fiscais (NFC-e) — Colapsável ── */}
+                    <div className="border border-gray-200 rounded-xl overflow-hidden">
+                        <button
+                            type="button"
+                            onClick={() => setFiscalAberto((prev) => !prev)}
+                            className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+                        >
+                            <span className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                                📋 Dados Fiscais (NFC-e)
+                                {watch('ncm') ? (
+                                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                                        NCM preenchido
+                                    </span>
+                                ) : (
+                                    <span className="text-[10px] font-medium text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                                        Usando padrão
+                                    </span>
+                                )}
+                            </span>
+                            {fiscalAberto
+                                ? <ChevronDown className="w-4 h-4 text-gray-400" />
+                                : <ChevronRight className="w-4 h-4 text-gray-400" />
+                            }
+                        </button>
+
+                        {fiscalAberto && (
+                            <div className="p-4 space-y-4 border-t border-gray-200">
+                                {/* NCM */}
+                                <div className="space-y-1.5">
+                                    <label className="text-sm font-medium text-gray-700">NCM</label>
+                                    <input
+                                        {...register('ncm')}
+                                        maxLength={8}
+                                        className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-200 outline-none font-mono"
+                                        placeholder="Ex: 21069090"
+                                        onInput={(e) => {
+                                            const el = e.currentTarget
+                                            el.value = el.value.replace(/\D/g, '').slice(0, 8)
+                                        }}
+                                    />
+                                    <p className="text-xs text-gray-400">
+                                        Código NCM do produto (consultar contador). Se vazio, usa padrão <strong>21069090</strong>.
+                                    </p>
+                                    {errors.ncm && <p className="text-xs text-red-500">{errors.ncm.message}</p>}
+                                </div>
+
+                                {/* CFOP */}
+                                <div className="space-y-1.5">
+                                    <label className="text-sm font-medium text-gray-700">CFOP</label>
+                                    <select
+                                        {...register('cfop')}
+                                        className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-200 outline-none bg-white"
+                                    >
+                                        {CFOP_OPTIONS.map((opt) => (
+                                            <option key={opt.value} value={opt.value}>
+                                                {opt.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <p className="text-xs text-gray-400">
+                                        Código fiscal da operação. Muda automaticamente conforme o Tipo de Produto.
+                                    </p>
+                                </div>
+
+                                {/* CSOSN */}
+                                <div className="space-y-1.5">
+                                    <label className="text-sm font-medium text-gray-700">CSOSN</label>
+                                    <select
+                                        {...register('csosn')}
+                                        className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-200 outline-none bg-white"
+                                    >
+                                        {CSOSN_OPTIONS.map((opt) => (
+                                            <option key={opt.value} value={opt.value}>
+                                                {opt.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <p className="text-xs text-gray-400">
+                                        Código tributário (Simples Nacional). Consulte seu contador.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {/* Footer: Toggles + Botões */}

@@ -22,7 +22,7 @@ interface ItemPedidoPDV {
     quantidade: number
     preco_unitario: number
     subtotal: number
-    produto: { nome: string } | null
+    produto: { nome: string; ncm?: string | null; cfop?: string | null; csosn?: string | null } | null
 }
 
 interface PedidoPDV {
@@ -146,7 +146,7 @@ export default function CaixaClient({
                     cliente:clientes ( nome ),
                     itens_pedido (
                         id, quantidade, preco_unitario, subtotal,
-                        produto:produtos ( nome )
+                        produto:produtos ( nome, ncm, cfop, csosn )
                     )
                 `)
                 .eq('status', 'pronto')
@@ -268,8 +268,12 @@ export default function CaixaClient({
                     cpfCliente: cpfClienteEnvio,
                     itens: pedido.itens_pedido.map((i) => ({
                         nome: i.produto?.nome ?? 'Produto',
+                        ncm: i.produto?.ncm || undefined,
+                        cfop: i.produto?.cfop ? Number(i.produto.cfop) : undefined,
+                        csosn: i.produto?.csosn || undefined,
                         quantidade: i.quantidade,
                         valorUnitario: i.preco_unitario,
+                        unidade: 'UN',
                     })),
                 }),
             })

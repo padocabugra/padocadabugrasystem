@@ -9,6 +9,7 @@ export interface ItemNFCe {
     nome: string
     ncm?: string
     cfop?: number
+    csosn?: string
     quantidade: number
     valorUnitario: number
     unidade?: string

@@ -21,6 +21,10 @@ interface CartItem {
     nome: string
     preco: number
     quantidade: number
+    // Dados fiscais vindos do produto
+    ncm?: string | null
+    cfop?: string | null
+    csosn?: string | null
 }
 
 interface NfceInfo {
@@ -104,6 +108,9 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                 nome: produto.nome,
                 preco: Number(produto.preco),
                 quantidade: 1,
+                ncm: produto.ncm ?? null,
+                cfop: produto.cfop ?? null,
+                csosn: produto.csosn ?? null,
             }]
         })
     }
@@ -180,8 +187,12 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                     cpfCliente: cpfClienteEnvio,
                     itens: itens.map((i) => ({
                         nome: i.nome,
+                        ncm: i.ncm || undefined,
+                        cfop: i.cfop ? Number(i.cfop) : undefined,
+                        csosn: i.csosn || undefined,
                         quantidade: i.quantidade,
                         valorUnitario: i.preco,
+                        unidade: 'UN',
                     })),
                 }),
             })
