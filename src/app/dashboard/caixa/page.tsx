@@ -62,7 +62,7 @@ export default async function CaixaPage() {
                 quantidade,
                 preco_unitario,
                 subtotal,
-                produto:produtos ( nome )
+                produto:produtos ( nome, ncm, cfop, csosn )
             )
         `)
         .eq('status', 'pronto')

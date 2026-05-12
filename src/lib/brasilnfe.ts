@@ -64,6 +64,7 @@ export async function emitirNFCe(dados: DadosNFCe): Promise<ResultadoNFCe> {
             NmProduto: item.nome,
             NCM: item.ncm || '21069090',
             CFOP: item.cfop || 5102,
+            CSOSN: item.csosn || '0102',
             Quantidade: item.quantidade,
             ValorUnitario: item.valorUnitario,
             UnidadeComercial: (item.unidade || 'UN').toUpperCase(),
