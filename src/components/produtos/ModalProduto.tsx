@@ -113,8 +113,14 @@ export default function ModalProduto({
             // Normaliza NCM — remove espaços, garante string ou null
             const ncmLimpo = data.ncm?.replace(/\D/g, '').slice(0, 8) || null
 
+            // Código (SKU): trim + string vazia vira null — evita colisão no índice
+            // único parcial idx_produtos_codigo_unique (que trata '' como valor real,
+            // não como nulo, e por isso rejeita o 2º produto sem SKU)
+            const codigoLimpo = data.codigo?.trim() ? data.codigo.trim() : null
+
             const payload = {
                 ...data,
+                codigo: codigoLimpo,
                 ncm: ncmLimpo,
                 cfop: data.cfop || null,
                 csosn: data.csosn || null,
@@ -134,6 +140,12 @@ export default function ModalProduto({
             onSuccess()
             onClose()
         } catch (err: unknown) {
+            const supabaseErr = err as { code?: string; message?: string }
+            if (supabaseErr?.code === '23505' && supabaseErr?.message?.includes('idx_produtos_codigo_unique')) {
+                console.error('Erro ao salvar produto (código duplicado):', err)
+                alert(`Já existe um produto com o código "${data.codigo}". Use um código (SKU) diferente ou deixe em branco.`)
+                return
+            }
             const msg = err instanceof Error ? err.message : JSON.stringify(err)
             console.error('Erro ao salvar produto:', err)
             alert('Erro ao salvar produto: ' + msg)
