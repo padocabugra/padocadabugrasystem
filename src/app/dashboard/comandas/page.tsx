@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import {
     CreditCard, RotateCcw, Ban, RefreshCw,
-    ArrowLeft, Loader2,
+    ArrowLeft, Loader2, AlertTriangle,
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -16,25 +16,43 @@ interface Comanda {
     updated_at: string
 }
 
-const statusConfig = {
+const statusConfig: Record<Comanda['status'], { color: string; label: string; dot: string }> = {
     livre: { color: 'bg-emerald-50 border-emerald-300 text-emerald-700', label: 'Livre', dot: 'bg-emerald-500' },
     ocupada: { color: 'bg-amber-50 border-amber-300 text-amber-700', label: 'Ocupada', dot: 'bg-amber-500' },
     bloqueada: { color: 'bg-red-50 border-red-300 text-red-600', label: 'Bloqueada', dot: 'bg-red-500' },
 }
 
+const FALLBACK_CONFIG = { color: 'bg-gray-50 border-gray-300 text-gray-600', label: 'Desconhecido', dot: 'bg-gray-400' }
+
 export default function ComandasAdminPage() {
     const [comandas, setComandas] = useState<Comanda[]>([])
     const [loading, setLoading] = useState(true)
+    const [fetchError, setFetchError] = useState<string | null>(null)
     const [actionLoading, setActionLoading] = useState<string | null>(null)
     const supabase = createClient()
 
     const fetchComandas = useCallback(async () => {
-        const { data } = await supabase
-            .from('comandas')
-            .select('id, numero, status, updated_at')
-            .order('numero')
-        setComandas(data ?? [])
-        setLoading(false)
+        try {
+            const { data, error } = await supabase
+                .from('comandas')
+                .select('id, numero, status, updated_at')
+                .order('numero')
+
+            if (error) {
+                console.error('[COMANDAS] Falha ao buscar:', error)
+                setFetchError(error.message || 'Erro ao carregar comandas.')
+                setComandas([])
+            } else {
+                setComandas(data ?? [])
+                setFetchError(null)
+            }
+        } catch (err) {
+            console.error('[COMANDAS] Exceção inesperada:', err)
+            setFetchError(err instanceof Error ? err.message : 'Erro desconhecido ao carregar comandas.')
+            setComandas([])
+        } finally {
+            setLoading(false)
+        }
     }, [supabase])
 
     useEffect(() => {
@@ -147,10 +165,28 @@ export default function ComandasAdminPage() {
                     <Loader2 className="w-6 h-6 animate-spin mr-2" />
                     Carregando comandas...
                 </div>
+            ) : fetchError ? (
+                <div className="flex flex-col items-center justify-center py-16 px-4 text-center bg-amber-50 border border-amber-200 rounded-2xl">
+                    <AlertTriangle className="w-10 h-10 text-amber-500 mb-3" />
+                    <p className="text-sm font-bold text-gray-800">Não foi possível carregar as comandas</p>
+                    <p className="text-xs text-gray-600 mt-1 max-w-md break-words">{fetchError}</p>
+                    <button
+                        onClick={() => { setLoading(true); fetchComandas() }}
+                        className="mt-4 h-10 px-4 rounded-xl bg-primary text-white text-sm font-bold hover:bg-primary/90 active:scale-95 transition-all flex items-center gap-2"
+                    >
+                        <RefreshCw className="w-4 h-4" />
+                        Tentar Novamente
+                    </button>
+                </div>
+            ) : comandas.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-gray-400">
+                    <CreditCard className="w-10 h-10 mb-3 text-gray-300" />
+                    <p className="text-sm font-medium">Nenhuma comanda cadastrada.</p>
+                </div>
             ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
                     {comandas.map((comanda) => {
-                        const config = statusConfig[comanda.status]
+                        const config = statusConfig[comanda.status] ?? FALLBACK_CONFIG
                         const isLoading = actionLoading === `reset-${comanda.numero}` || actionLoading === `block-${comanda.numero}`
 
                         return (
