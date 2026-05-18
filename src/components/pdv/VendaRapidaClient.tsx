@@ -22,6 +22,8 @@ interface CartItem {
     preco: number
     quantidade: number
     // Dados fiscais vindos do produto
+    codigo?: string | null
+    unidade_medida?: string | null
     ncm?: string | null
     cfop?: string | null
     csosn?: string | null
@@ -108,6 +110,8 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                 nome: produto.nome,
                 preco: Number(produto.preco),
                 quantidade: 1,
+                codigo: produto.codigo ?? null,
+                unidade_medida: produto.unidade_medida ?? null,
                 ncm: produto.ncm ?? null,
                 cfop: produto.cfop ?? null,
                 csosn: produto.csosn ?? null,
@@ -186,13 +190,14 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                     formaPagamento: forma,
                     cpfCliente: cpfClienteEnvio,
                     itens: itens.map((i) => ({
+                        codigo: (i.codigo && i.codigo.trim()) || i.id,
                         nome: i.nome,
                         ncm: i.ncm || undefined,
                         cfop: i.cfop ? Number(i.cfop) : undefined,
                         csosn: i.csosn || undefined,
                         quantidade: i.quantidade,
                         valorUnitario: i.preco,
-                        unidade: 'UN',
+                        unidade: i.unidade_medida || 'UN',
                     })),
                 }),
             })

@@ -6,6 +6,8 @@
 // =============================================================
 
 export interface ItemNFCe {
+    /** Código do produto (cProd). Pode ser SKU cadastrado ou id sanitizado como fallback. */
+    codigo: string
     nome: string
     ncm?: string
     cfop?: number
@@ -13,6 +15,20 @@ export interface ItemNFCe {
     quantidade: number
     valorUnitario: number
     unidade?: string
+}
+
+// SEFAZ rejeita cProd com espaço, acento e caracteres especiais. Mantém somente
+// alfanuméricos, hífen, underscore e ponto; colapsa repetidos; limita a 60 chars.
+export function sanitizarCodigoProduto(input: string): string {
+    const limpo = (input ?? '')
+        .normalize('NFD')
+        .replace(/[̀-ͯ]/g, '')
+        .replace(/[^a-zA-Z0-9._-]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^[-_.]+|[-_.]+$/g, '')
+        .toUpperCase()
+        .slice(0, 60)
+    return limpo || 'SEM-CODIGO'
 }
 
 export interface DadosNFCe {
@@ -61,6 +77,7 @@ export async function emitirNFCe(dados: DadosNFCe): Promise<ResultadoNFCe> {
             ? { CpfCnpj: dados.cpfCliente, IndicadorIe: 9 }
             : null,
         Produtos: dados.itens.map((item) => ({
+            CodProduto: sanitizarCodigoProduto(item.codigo),
             NmProduto: item.nome,
             NCM: item.ncm || '21069090',
             CFOP: item.cfop || 5102,
