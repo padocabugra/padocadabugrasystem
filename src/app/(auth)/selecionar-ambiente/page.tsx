@@ -37,11 +37,14 @@ const ENVIRONMENTS = [
 ]
 
 export default async function SelecionarAmbientePage() {
+    console.log('[AMB-DEBUG] === selecionar-ambiente entrou ===')
     const supabase = await createClient()
 
     // 1. Verificar Autenticação
     const { data: { user } } = await supabase.auth.getUser()
+    console.log('[AMB-DEBUG] getUser =>', { hasUser: !!user, id: user?.id, email: user?.email })
     if (!user) {
+        console.warn('[AMB-DEBUG] sem user, redirecionando pra /login')
         redirect('/login')
     }
 
@@ -52,7 +55,10 @@ export default async function SelecionarAmbientePage() {
         .eq('id', user.id)
         .single()
 
+    console.log('[AMB-DEBUG] usuarios lookup =>', { hasUsuario: !!usuario, role: usuario?.role, err: error?.message })
+
     if (error || !usuario) {
+        console.warn('[AMB-DEBUG] usuario não encontrado, fazendo signOut + redirect pra /login')
         // Logout forçado se usuário não existir na tabela pública
         await supabase.auth.signOut()
         redirect('/login')

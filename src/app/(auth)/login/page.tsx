@@ -32,20 +32,49 @@ export default function LoginPage() {
         setIsLoading(true)
         setServerError(null)
 
+        console.log('[LOGIN-DEBUG] === INÍCIO ===')
+        console.log('[LOGIN-DEBUG] cookies ANTES do signIn:', document.cookie || '(vazio)')
+        console.log('[LOGIN-DEBUG] localStorage keys ANTES:', Object.keys(localStorage))
+        console.log('[LOGIN-DEBUG] navigator.locks disponível?', !!navigator.locks)
+
         const supabase = createClient()
-        const { error } = await supabase.auth.signInWithPassword({
+        console.log('[LOGIN-DEBUG] cliente criado, chamando signInWithPassword...')
+
+        const t0 = performance.now()
+        const { data: signInData, error } = await supabase.auth.signInWithPassword({
             email: data.email,
             password: data.password,
         })
+        const dt = (performance.now() - t0).toFixed(0)
+
+        console.log('[LOGIN-DEBUG] signInWithPassword retornou em', dt, 'ms')
+        console.log('[LOGIN-DEBUG] error:', error)
+        console.log('[LOGIN-DEBUG] data.session existe?', !!signInData?.session)
+        console.log('[LOGIN-DEBUG] data.user existe?', !!signInData?.user)
+        console.log('[LOGIN-DEBUG] data.session.access_token len:', signInData?.session?.access_token?.length)
+        console.log('[LOGIN-DEBUG] data.session.refresh_token:', signInData?.session?.refresh_token)
+        console.log('[LOGIN-DEBUG] cookies DEPOIS do signIn:', document.cookie || '(vazio)')
+        console.log('[LOGIN-DEBUG] localStorage keys DEPOIS:', Object.keys(localStorage))
 
         if (error) {
+            console.warn('[LOGIN-DEBUG] caindo no branch de erro:', error)
             setServerError('E-mail ou senha inválidos. Tente novamente.')
             setIsLoading(false)
             return
         }
 
+        // Tentativa imediata de getSession pra ver se ela "achou" alguma coisa
+        const { data: sessionCheck, error: sessionErr } = await supabase.auth.getSession()
+        console.log('[LOGIN-DEBUG] getSession() logo após signIn:', { hasSession: !!sessionCheck?.session, err: sessionErr })
+
+        console.log('[LOGIN-DEBUG] chamando router.push /selecionar-ambiente')
         router.push('/selecionar-ambiente')
         router.refresh()
+
+        // Loga estado após push (vai aparecer só se a navegação não desmonta o componente imediatamente)
+        setTimeout(() => {
+            console.log('[LOGIN-DEBUG] cookies 500ms APÓS push:', document.cookie || '(vazio)')
+        }, 500)
     }
 
     return (

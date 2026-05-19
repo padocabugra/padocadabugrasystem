@@ -25,12 +25,20 @@ export async function middleware(request: NextRequest) {
         }
     )
 
+    const pathname = request.nextUrl.pathname
+
     // Atualiza a sessão — NUNCA faça outras lógicas antes disso
     const {
         data: { user },
     } = await supabase.auth.getUser()
 
-    const pathname = request.nextUrl.pathname
+    // Debug auth: loga estado do cookie/user pra rotas críticas de login
+    const isAuthCriticalPath = pathname === '/login' || pathname === '/selecionar-ambiente'
+    if (isAuthCriticalPath) {
+        const cookieNames = request.cookies.getAll().map(c => c.name)
+        const sbCookies = cookieNames.filter(n => n.startsWith('sb-'))
+        console.log('[MW-DEBUG]', pathname, '| user?', !!user, '| user.id:', user?.id, '| sb-cookies:', sbCookies, '| total cookies:', cookieNames.length)
+    }
 
     // Protege rotas autenticadas (/dashboard e /selecionar-ambiente)
     if ((pathname.startsWith('/dashboard') || pathname === '/selecionar-ambiente') && !user) {
