@@ -65,6 +65,7 @@ export async function POST(req: Request) {
             total: Number(total),
             formaPagamento: String(formaPagamento),
             cpfCliente: cpfCliente || undefined,
+            identificadorInterno: pedidoId && typeof pedidoId === 'string' ? pedidoId : undefined,
         })
 
         // ── Atualiza pedido com status fiscal ────────────────────────

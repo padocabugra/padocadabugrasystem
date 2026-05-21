@@ -197,7 +197,6 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                     itens: itens.map((i) => ({
                         codigo: (i.codigo && i.codigo.trim()) || i.id,
                         nome: i.nome,
-                        ean: i.codigo ?? null,
                         ncm: i.ncm || undefined,
                         cfop: i.cfop ? Number(i.cfop) : undefined,
                         csosn: i.csosn || undefined,

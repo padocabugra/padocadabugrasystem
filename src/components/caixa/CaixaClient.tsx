@@ -282,7 +282,6 @@ export default function CaixaClient({
                     itens: pedido.itens_pedido.map((i) => ({
                         codigo: (i.produto?.codigo && i.produto.codigo.trim()) || i.produto?.id || i.id,
                         nome: i.produto?.nome ?? 'Produto',
-                        ean: i.produto?.codigo ?? null,
                         ncm: i.produto?.ncm || undefined,
                         cfop: i.produto?.cfop ? Number(i.produto.cfop) : undefined,
                         csosn: i.produto?.csosn || undefined,

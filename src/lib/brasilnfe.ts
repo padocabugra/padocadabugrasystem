@@ -3,14 +3,27 @@
 //
 // Server-side apenas: este módulo lê BRASIL_NFE_TOKEN do .env e
 // não pode ser importado em client components.
+//
+// Estrutura do payload validada por trabalho com o suporte oficial
+// da Brasil NFe (2026-05-21) — a doc pública em /products/nfc-e
+// está incompleta. Diferenças críticas do que a doc mostra:
+//
+//   campo na doc            → nome real na API
+//   ────────────────────────────────────────────
+//   CodProduto              → CodProdutoServico
+//   ValorTotalProduto       → ValorTotal
+//   (não mostrado)          → UnidadeComercial (obrigatório)
+//   só ICMS                 → ICMS + PIS + COFINS (obrigatórios)
+//   Serie/Numero no payload → controle automático pelo painel
+//                             (NÃO enviar; senão pula numeração)
+//   (não mostrado)          → IdentificadorInterno (idempotência)
+//
 // =============================================================
 
 export interface ItemNFCe {
     /** Código do produto (cProd). Pode ser SKU cadastrado ou id sanitizado como fallback. */
     codigo: string
     nome: string
-    /** EAN/GTIN do produto (cEAN). Se ausente ou inválido, vai como "SEM GTIN". */
-    ean?: string | null
     ncm?: string
     cfop?: number
     csosn?: string
@@ -33,37 +46,25 @@ export function sanitizarCodigoProduto(input: string): string {
     return limpo || 'SEM-CODIGO'
 }
 
-// EAN/GTIN da SEFAZ aceita "SEM GTIN" (NT 2020.006) ou 8/12/13/14 dígitos com DV válido.
-// Não valida o dígito verificador aqui; só checa o comprimento e que sejam só dígitos.
-function normalizarEAN(input?: string | null): string {
-    const apenasDigitos = (input ?? '').replace(/\D/g, '')
-    if ([8, 12, 13, 14].includes(apenasDigitos.length)) return apenasDigitos
-    return 'SEM GTIN'
-}
-
 // CSOSN é SEMPRE 3 dígitos (102, 103, 300, 400, 500, 900 para NFC-e).
 // Telas costumam mostrar "0102" = Origem(0) + CSOSN(102), mas no payload os
 // campos são separados. Este helper extrai os 3 últimos dígitos se vier
 // concatenado, mantendo CSOSN puro.
 function normalizarCSOSN(input?: string | null): string {
     const digitos = (input ?? '').replace(/\D/g, '')
-    if (digitos.length === 4) return digitos.slice(1)   // "0102" → "102"
+    if (digitos.length === 4) return digitos.slice(1)
     if (digitos.length === 3) return digitos
     return '102'
 }
 
 // xProd (descrição do produto) da NFC-e: SEFAZ aceita UTF-8 em tese, mas
-// integradores como a Brasil NFe rejeitam acentos na pré-validação, com
-// mensagem ambígua tipo "A descrição do produto/servico ... é inválida".
-// Normaliza removendo diacríticos (U+0300..U+036F), chars de controle ASCII
-// (U+0000..U+001F + U+007F) e símbolos que quebram XML (< > & "). Limita a
-// 120 chars (max do xProd na spec). Regex escrita com \u escapes pra evitar
-// chars invisíveis no source (que faziam o git tratar o arquivo como binário).
+// integradores como a Brasil NFe rejeitam acentos. Normaliza removendo
+// diacríticos, chars de controle e símbolos que quebram XML. Limita a 120.
 function sanitizarNomeProduto(input: string): string {
     const limpo = (input ?? '')
         .normalize('NFD')
         .replace(/[̀-ͯ]/g, '')
-        .replace(/[^ -~]/g, '') // só ASCII visível: remove controle + Unicode não-ASCII
+        .replace(/[^ -~]/g, '')
         .replace(/[<>&"]/g, '')
         .replace(/\s+/g, ' ')
         .trim()
@@ -76,6 +77,8 @@ export interface DadosNFCe {
     total: number
     formaPagamento: string
     cpfCliente?: string
+    /** ID único do pedido para idempotência (IdentificadorInterno na API). */
+    identificadorInterno?: string
 }
 
 export interface ResultadoNFCe {
@@ -112,46 +115,47 @@ export async function emitirNFCe(dados: DadosNFCe): Promise<ResultadoNFCe> {
         return { ok: false, erro: 'Configuração da API Brasil NFe ausente (BRASIL_NFE_URL / BRASIL_NFE_TOKEN).' }
     }
 
+    // IdentificadorInterno: único por tentativa de emissão (não por pedido).
+    // A Brasil NFe usa pra deduplicar. Combinar pedidoId + timestamp garante
+    // que uma reemissão após falha consiga passar (sem ser bloqueada como duplicada).
+    const identificadorInterno = dados.identificadorInterno
+        ? `${dados.identificadorInterno}-${Date.now()}`
+        : `pdv-${Date.now()}`
+
     const payload = {
         TipoAmbiente: ambiente,
         ModeloDocumento: 65,
         Finalidade: 1,
-        NaturezaOperacao: 'Venda ao Consumidor Final',
+        NaturezaOperacao: 'Venda ao Consumidor',
         ConsumidorFinal: true,
         IndicadorPresenca: 1,
+        IdentificadorInterno: identificadorInterno,
+        // Brasil NFe controla Série e Número automaticamente via painel
+        // (Modelo 65, Série 1, N° Padrão: Sim). NÃO ENVIAR Serie/Numero
+        // — senão a numeração começa a pular conforme tentativas falhas.
         Cliente: dados.cpfCliente
             ? { CpfCnpj: dados.cpfCliente, IndicadorIe: 9 }
-            : null,
+            : { CpfCnpj: '00000000000000', NmCliente: 'Consumidor Final', IndicadorIe: 9 },
         Produtos: dados.itens.map((item) => {
             const unidade = (item.unidade || 'UN').toUpperCase()
             const quantidade = Number(item.quantidade)
             const valorUnitario = Number(item.valorUnitario)
-            // vProd é arredondado a 2 casas; a SEFAZ rejeita se o somatório
-            // do vProd dos itens divergir do total da nota.
             const valorTotal = Math.round(quantidade * valorUnitario * 100) / 100
-            const ean = normalizarEAN(item.ean)
             return {
-                // Nome confirmado pelo suporte da Brasil NFe (2026-05-21).
-                // Doc publica usa CodProduto, mas a API exige CodProdutoServico.
                 CodProdutoServico: sanitizarCodigoProduto(item.codigo),
                 NmProduto: sanitizarNomeProduto(item.nome),
-                EANComercial: ean,
-                EANTributavel: ean,
                 NCM: item.ncm || '21069090',
                 CFOP: item.cfop || 5102,
+                UnidadeComercial: unidade,
                 Quantidade: quantidade,
                 ValorUnitario: valorUnitario,
-                ValorTotalProduto: valorTotal,
-                UnidadeComercial: unidade,
-                QuantidadeTributavel: quantidade,
-                UnidadeTributavel: unidade,
-                ValorUnitarioTributavel: valorUnitario,
-                IndicadorTotal: 1,
-                OrigemProduto: 0,
+                ValorTotal: valorTotal,
                 Imposto: {
-                    ICMS: {
-                        CodSituacaoTributaria: normalizarCSOSN(item.csosn),
-                    },
+                    // Simples Nacional: ICMS sem destaque (CSOSN), PIS/COFINS
+                    // sem incidência (CST 49). A API calcula valores automaticamente.
+                    ICMS: { Origem: 0, CodSituacaoTributaria: normalizarCSOSN(item.csosn) },
+                    PIS: { CodSituacaoTributaria: '49' },
+                    COFINS: { CodSituacaoTributaria: '49' },
                 },
             }
         }),
@@ -176,9 +180,7 @@ export async function emitirNFCe(dados: DadosNFCe): Promise<ResultadoNFCe> {
 
         const json: any = await res.json().catch(() => null)
 
-        // Em homologação registramos request+response completos pra debug
-        // de rejeições da SEFAZ. A doc da Brasil NFe não cobre todos os
-        // campos; o response é a única fonte autoritativa pra diagnosticar.
+        // Em homologação registramos request+response completos pra debug.
         const debug = ambiente === 2
             ? { statusHttp: res.status, payloadEnviado: payload, respostaCrua: json }
             : undefined
