@@ -4,6 +4,7 @@ import type { Usuario } from '@/lib/types'
 import Sidebar from '@/components/layout/Sidebar'
 import MobileHeader from '@/components/layout/MobileHeader'
 import EnvironmentSwitcher from '@/components/layout/EnvironmentSwitcher'
+import { ThermalPrinterProvider } from '@/components/shared/ThermalPrinterContext'
 
 export default async function DashboardLayout({
     children,
@@ -38,26 +39,28 @@ export default async function DashboardLayout({
     const currentUser = usuario as Usuario
 
     return (
-        <div className="flex flex-col lg:flex-row h-screen bg-blue-50/30 overflow-hidden">
-            <Sidebar usuario={currentUser} />
-            <MobileHeader usuario={currentUser} />
-            <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-                <header className="hidden lg:flex h-16 border-b border-blue-100 bg-white items-center justify-between px-6 shadow-sm z-10">
-                    <div className="flex items-center gap-4">
-                        <EnvironmentSwitcher usuario={currentUser} />
-                    </div>
-                    <div className="flex items-center gap-4">
-                        {/* Informações do Usuário (Mobile/Desktop) */}
-                        <div className="text-right hidden sm:block">
-                            <p className="text-sm font-semibold text-gray-900">{currentUser.nome}</p>
-                            <p className="text-xs text-secondary capitalize font-medium">{currentUser.role}</p>
+        <ThermalPrinterProvider>
+            <div className="flex flex-col lg:flex-row h-screen bg-blue-50/30 overflow-hidden">
+                <Sidebar usuario={currentUser} />
+                <MobileHeader usuario={currentUser} />
+                <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+                    <header className="hidden lg:flex h-16 border-b border-blue-100 bg-white items-center justify-between px-6 shadow-sm z-10">
+                        <div className="flex items-center gap-4">
+                            <EnvironmentSwitcher usuario={currentUser} />
                         </div>
-                    </div>
-                </header>
-                <main className="flex-1 overflow-auto p-3 sm:p-4 lg:p-6 scrollbar-thin scrollbar-thumb-blue-100 scrollbar-track-transparent">
-                    {children}
-                </main>
+                        <div className="flex items-center gap-4">
+                            {/* Informações do Usuário (Mobile/Desktop) */}
+                            <div className="text-right hidden sm:block">
+                                <p className="text-sm font-semibold text-gray-900">{currentUser.nome}</p>
+                                <p className="text-xs text-secondary capitalize font-medium">{currentUser.role}</p>
+                            </div>
+                        </div>
+                    </header>
+                    <main className="flex-1 overflow-auto p-3 sm:p-4 lg:p-6 scrollbar-thin scrollbar-thumb-blue-100 scrollbar-track-transparent">
+                        {children}
+                    </main>
+                </div>
             </div>
-        </div>
+        </ThermalPrinterProvider>
     )
 }

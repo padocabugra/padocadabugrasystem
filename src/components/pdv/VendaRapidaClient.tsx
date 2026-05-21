@@ -15,6 +15,8 @@ import CpfNotaInput from '@/components/shared/CpfNotaInput'
 import { QRCodeSVG } from 'qrcode.react'
 import DanfeNFCePrint from '@/components/caixa/DanfeNFCePrint'
 import { dataHoraLocalVisual, getAgoraUTC } from '@/lib/timezone'
+import { useThermalPrinter } from '@/components/shared/ThermalPrinterContext'
+import { useCallback } from 'react'
 
 type FormaPagamento = 'dinheiro' | 'pix' | 'debito' | 'credito'
 
@@ -77,6 +79,32 @@ const FORMAS: { value: FormaPagamento; label: string; icon: React.ReactNode }[] 
 
 export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }: Props) {
     const supabase = createClient()
+    const impressora = useThermalPrinter()
+
+    const imprimirAuto = useCallback(async (r: ReciboFinal) => {
+        if (!r.nfce?.ok || !r.nfce.chaveAcesso) return
+        if (!impressora.conectada) return
+        await impressora.imprimir({
+            razaoSocial: process.env.NEXT_PUBLIC_EMPRESA_RAZAO_SOCIAL || 'BUGRA LTDA',
+            cnpj: process.env.NEXT_PUBLIC_EMPRESA_CNPJ || '',
+            inscricaoEstadual: process.env.NEXT_PUBLIC_EMPRESA_IE,
+            endereco: process.env.NEXT_PUBLIC_EMPRESA_ENDERECO,
+            chaveAcesso: r.nfce.chaveAcesso,
+            itens: r.itensSnapshot.map((i) => ({
+                quantidade: i.quantidade,
+                precoUnitario: i.preco,
+                subtotal: i.preco * i.quantidade,
+                nome: i.nome,
+                codigo: i.codigo ?? null,
+            })),
+            total: r.total,
+            valorPago: r.total + r.troco,
+            troco: r.troco,
+            formaPagamentoLabel: FORMA_LABEL[r.formaPagamento],
+            dataHora: dataHoraLocalVisual(getAgoraUTC()),
+            cpfCliente: r.cpfCliente,
+        })
+    }, [impressora])
 
     const [carrinho, setCarrinho] = useState<CartItem[]>([])
     const [busca, setBusca] = useState('')
@@ -158,6 +186,13 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
         window.addEventListener('keydown', onKey)
         return () => window.removeEventListener('keydown', onKey)
     }, [modalPagamento])
+
+    // ── Impressao automatica ao emitir NFC-e ──────────────────────────
+    useEffect(() => {
+        if (recibo?.nfce?.ok && recibo.nfce.chaveAcesso) {
+            void imprimirAuto(recibo)
+        }
+    }, [recibo, imprimirAuto])
 
     // ── Caixa fechado: tela bloqueadora (após hooks p/ respeitar Rules of Hooks) ──
     if (!caixaAberto) {
@@ -653,13 +688,33 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                                             </p>
                                         )}
                                     </div>
-                                    <button
-                                        onClick={() => window.print()}
-                                        className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-extrabold text-sm transition-all active:scale-[0.98] shadow-sm flex items-center justify-center gap-2"
-                                    >
-                                        <Printer className="w-5 h-5" />
-                                        Imprimir Cupom Fiscal
-                                    </button>
+                                    {impressora.suportado && !impressora.conectada && (
+                                        <button
+                                            onClick={impressora.parear}
+                                            className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-extrabold text-sm transition-all active:scale-[0.98] shadow-sm flex items-center justify-center gap-2"
+                                        >
+                                            <Printer className="w-5 h-5" />
+                                            Conectar Impressora
+                                        </button>
+                                    )}
+                                    {impressora.conectada && (
+                                        <button
+                                            onClick={() => imprimirAuto(recibo!)}
+                                            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-extrabold text-sm transition-all active:scale-[0.98] shadow-sm flex items-center justify-center gap-2"
+                                        >
+                                            <Printer className="w-5 h-5" />
+                                            Reimprimir Cupom
+                                        </button>
+                                    )}
+                                    {!impressora.suportado && (
+                                        <button
+                                            onClick={() => window.print()}
+                                            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-extrabold text-sm transition-all active:scale-[0.98] shadow-sm flex items-center justify-center gap-2"
+                                        >
+                                            <Printer className="w-5 h-5" />
+                                            Imprimir Cupom Fiscal
+                                        </button>
+                                    )}
                                   </>
                                 ) : (
                                     <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 space-y-1.5">
