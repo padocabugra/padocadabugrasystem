@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import {
     Search, Plus, Minus, Trash2, ShoppingCart, Package,
     Banknote, Smartphone, CreditCard, X, Zap, Lock, CheckCircle2,
-    Receipt, AlertTriangle, RefreshCw,
+    Receipt, AlertTriangle, RefreshCw, Printer,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency, unformatCPF, isValidCPF } from '@/lib/formatters'
@@ -640,17 +640,12 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                             )}
                             {recibo.nfce && (
                                 recibo.nfce.ok ? (
+                                  <>
                                     <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3 space-y-1.5">
                                         <div className="flex items-center justify-between text-sm">
                                             <span className="text-emerald-700 font-bold flex items-center gap-1.5">
                                                 <Receipt className="w-4 h-4" /> NFC-e emitida
                                             </span>
-                                            <button
-                                                onClick={() => window.print()}
-                                                className="text-xs font-bold text-emerald-700 hover:underline"
-                                            >
-                                                Imprimir DANFE
-                                            </button>
                                         </div>
                                         {recibo.nfce.chaveAcesso && (
                                             <p className="text-[10px] font-mono text-emerald-700/80 break-all">
@@ -658,6 +653,14 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                                             </p>
                                         )}
                                     </div>
+                                    <button
+                                        onClick={() => window.print()}
+                                        className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-extrabold text-sm transition-all active:scale-[0.98] shadow-sm flex items-center justify-center gap-2"
+                                    >
+                                        <Printer className="w-5 h-5" />
+                                        Imprimir Cupom Fiscal
+                                    </button>
+                                  </>
                                 ) : (
                                     <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 space-y-1.5">
                                         <div className="flex items-center justify-between text-sm">

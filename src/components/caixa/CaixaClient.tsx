@@ -7,7 +7,7 @@ import { toast } from 'sonner'
 import {
     Search, Receipt, Banknote, CreditCard, Smartphone, ArrowDownCircle,
     ArrowUpCircle, ChevronRight, RefreshCw, CheckCircle2, X,
-    DollarSign, Clock, AlertTriangle, Hash, User, Star
+    DollarSign, Clock, AlertTriangle, Hash, User, Star, Printer
 } from 'lucide-react'
 import { dataHoraLocalVisual, getAgoraUTC } from '@/lib/timezone'
 import { unformatCPF, isValidCPF } from '@/lib/formatters'
@@ -619,23 +619,26 @@ export default function CaixaClient({
                             {/* NFC-e — Status fiscal */}
                             {reciboAtual.nfce && (
                                 reciboAtual.nfce.ok ? (
-                                    <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2.5 space-y-1.5">
-                                        <div className="flex items-center justify-between text-sm">
-                                            <span className="text-emerald-700 font-semibold flex items-center gap-1.5">
-                                                <Receipt className="w-4 h-4" /> NFC-e emitida
-                                            </span>
-                                            <button
-                                                onClick={() => window.print()}
-                                                className="text-xs font-bold text-emerald-700 hover:underline"
-                                            >
-                                                Imprimir DANFE
-                                            </button>
+                                    <div className="space-y-2">
+                                        <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2.5 space-y-1.5">
+                                            <div className="flex items-center justify-between text-sm">
+                                                <span className="text-emerald-700 font-semibold flex items-center gap-1.5">
+                                                    <Receipt className="w-4 h-4" /> NFC-e emitida
+                                                </span>
+                                            </div>
+                                            {reciboAtual.nfce.chaveAcesso && (
+                                                <p className="text-[10px] font-mono text-emerald-700/80 break-all">
+                                                    {reciboAtual.nfce.chaveAcesso}
+                                                </p>
+                                            )}
                                         </div>
-                                        {reciboAtual.nfce.chaveAcesso && (
-                                            <p className="text-[10px] font-mono text-emerald-700/80 break-all">
-                                                {reciboAtual.nfce.chaveAcesso}
-                                            </p>
-                                        )}
+                                        <button
+                                            onClick={() => window.print()}
+                                            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-extrabold text-sm transition-all active:scale-[0.98] shadow-sm flex items-center justify-center gap-2"
+                                        >
+                                            <Printer className="w-5 h-5" />
+                                            Imprimir Cupom Fiscal
+                                        </button>
                                     </div>
                                 ) : (
                                     <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 space-y-1.5">
