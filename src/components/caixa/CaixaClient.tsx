@@ -14,6 +14,7 @@ import { unformatCPF, isValidCPF } from '@/lib/formatters'
 import CpfNotaInput from '@/components/shared/CpfNotaInput'
 import { registrarAuditLog } from '@/lib/audit-log'
 import { QRCodeSVG } from 'qrcode.react'
+import DanfeNFCePrint from '@/components/caixa/DanfeNFCePrint'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -518,6 +519,20 @@ export default function CaixaClient({
 
     return (
         <>
+            {/* ── DANFE NFC-e oculto pra impressão térmica 80mm ── */}
+            {reciboAtual && reciboAtual.nfce?.ok && reciboAtual.nfce.chaveAcesso && (
+                <DanfeNFCePrint
+                    chaveAcesso={reciboAtual.nfce.chaveAcesso}
+                    itens={reciboAtual.itens}
+                    total={reciboAtual.total}
+                    valorPago={reciboAtual.valorPago}
+                    troco={reciboAtual.troco}
+                    formaPagamentoLabel={FORMA_LABEL[reciboAtual.formaPagamento]}
+                    dataHora={reciboAtual.dataHora}
+                    cpfCliente={reciboAtual.cpfCliente}
+                />
+            )}
+
             {/* ── Modal Cupom Digital (Recibo) ── */}
             {reciboAtual && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -609,16 +624,12 @@ export default function CaixaClient({
                                             <span className="text-emerald-700 font-semibold flex items-center gap-1.5">
                                                 <Receipt className="w-4 h-4" /> NFC-e emitida
                                             </span>
-                                            {reciboAtual.nfce.danfeUrl && (
-                                                <a
-                                                    href={reciboAtual.nfce.danfeUrl}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="text-xs font-bold text-emerald-700 hover:underline"
-                                                >
-                                                    Imprimir DANFE
-                                                </a>
-                                            )}
+                                            <button
+                                                onClick={() => window.print()}
+                                                className="text-xs font-bold text-emerald-700 hover:underline"
+                                            >
+                                                Imprimir DANFE
+                                            </button>
                                         </div>
                                         {reciboAtual.nfce.chaveAcesso && (
                                             <p className="text-[10px] font-mono text-emerald-700/80 break-all">

@@ -13,6 +13,8 @@ import { formatCurrency, unformatCPF, isValidCPF } from '@/lib/formatters'
 import type { Produto } from '@/lib/types'
 import CpfNotaInput from '@/components/shared/CpfNotaInput'
 import { QRCodeSVG } from 'qrcode.react'
+import DanfeNFCePrint from '@/components/caixa/DanfeNFCePrint'
+import { dataHoraLocalVisual, getAgoraUTC } from '@/lib/timezone'
 
 type FormaPagamento = 'dinheiro' | 'pix' | 'debito' | 'credito'
 
@@ -57,6 +59,13 @@ interface Props {
     vendedorNome: string
     caixaAberto: boolean
     produtos: Produto[]
+}
+
+const FORMA_LABEL: Record<FormaPagamento, string> = {
+    dinheiro: 'Dinheiro',
+    pix: 'PIX',
+    debito: 'Cartão Débito',
+    credito: 'Cartão Crédito',
 }
 
 const FORMAS: { value: FormaPagamento; label: string; icon: React.ReactNode }[] = [
@@ -306,6 +315,26 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
 
     // ─────────────────────────────────────────────────────────────────
     return (
+        <>
+            {/* ── DANFE NFC-e oculto pra impressão térmica 80mm ── */}
+            {recibo && recibo.nfce?.ok && recibo.nfce.chaveAcesso && (
+                <DanfeNFCePrint
+                    chaveAcesso={recibo.nfce.chaveAcesso}
+                    itens={recibo.itensSnapshot.map((i) => ({
+                        quantidade: i.quantidade,
+                        preco_unitario: i.preco,
+                        subtotal: i.preco * i.quantidade,
+                        produto: { nome: i.nome, codigo: i.codigo ?? null },
+                    }))}
+                    total={recibo.total}
+                    valorPago={recibo.total + recibo.troco}
+                    troco={recibo.troco}
+                    formaPagamentoLabel={FORMA_LABEL[recibo.formaPagamento]}
+                    dataHora={dataHoraLocalVisual(getAgoraUTC())}
+                    cpfCliente={recibo.cpfCliente}
+                />
+            )}
+
         <div className="flex flex-col gap-3 h-[calc(100vh-7rem)]">
             {/* Header */}
             <div className="flex items-center justify-between shrink-0">
@@ -616,16 +645,12 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                                             <span className="text-emerald-700 font-bold flex items-center gap-1.5">
                                                 <Receipt className="w-4 h-4" /> NFC-e emitida
                                             </span>
-                                            {recibo.nfce.danfeUrl && (
-                                                <a
-                                                    href={recibo.nfce.danfeUrl}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="text-xs font-bold text-emerald-700 hover:underline"
-                                                >
-                                                    Imprimir DANFE
-                                                </a>
-                                            )}
+                                            <button
+                                                onClick={() => window.print()}
+                                                className="text-xs font-bold text-emerald-700 hover:underline"
+                                            >
+                                                Imprimir DANFE
+                                            </button>
                                         </div>
                                         {recibo.nfce.chaveAcesso && (
                                             <p className="text-[10px] font-mono text-emerald-700/80 break-all">
@@ -683,5 +708,6 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                 </div>
             )}
         </div>
+        </>
     )
 }
