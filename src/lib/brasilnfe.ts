@@ -65,6 +65,12 @@ export interface ResultadoNFCe {
     protocolo?: string
     danfeUrl?: string
     erro?: string
+    /** Apenas em homologação: response cru da Brasil NFe + payload enviado, pra debug. */
+    debug?: {
+        statusHttp: number
+        payloadEnviado: unknown
+        respostaCrua: unknown
+    }
 }
 
 const FORMA_PAGAMENTO_MAP: Record<string, string> = {
@@ -152,7 +158,10 @@ export async function emitirNFCe(dados: DadosNFCe): Promise<ResultadoNFCe> {
         // Em homologação registramos request+response completos pra debug
         // de rejeições da SEFAZ. A doc da Brasil NFe não cobre todos os
         // campos; o response é a única fonte autoritativa pra diagnosticar.
-        if (ambiente === 2) {
+        const debug = ambiente === 2
+            ? { statusHttp: res.status, payloadEnviado: payload, respostaCrua: json }
+            : undefined
+        if (debug) {
             console.log('[brasilnfe] payload →', JSON.stringify(payload))
             console.log('[brasilnfe] response (status %d) ←', res.status, JSON.stringify(json))
         }
@@ -165,7 +174,7 @@ export async function emitirNFCe(dados: DadosNFCe): Promise<ResultadoNFCe> {
                 ?? json?.MotivoRejeicao
                 ?? json?.erro
                 ?? `HTTP ${res.status}`
-            return { ok: false, erro: String(erro) }
+            return { ok: false, erro: String(erro), debug }
         }
 
         // A API Brasil NFe retorna dados dentro de ReturnNF.
@@ -185,10 +194,10 @@ export async function emitirNFCe(dados: DadosNFCe): Promise<ResultadoNFCe> {
                 ?? json?.Mensagem
                 ?? json?.MotivoRejeicao
                 ?? 'Resposta sem autorização da SEFAZ'
-            return { ok: false, erro: String(motivo) }
+            return { ok: false, erro: String(motivo), debug }
         }
 
-        return { ok: true, chaveAcesso, protocolo }
+        return { ok: true, chaveAcesso, protocolo, debug }
     } catch (err: any) {
         return { ok: false, erro: err?.message ?? 'Erro desconhecido ao conectar com Brasil NFe' }
     }

@@ -58,6 +58,11 @@ interface NfceInfo {
     chaveAcesso?: string
     danfeUrl?: string
     erro?: string
+    debug?: {
+        statusHttp: number
+        payloadEnviado: unknown
+        respostaCrua: unknown
+    }
 }
 
 interface DadosRecibo {
@@ -643,6 +648,19 @@ export default function CaixaClient({
                                         <p className="text-[11px] text-amber-700/70">
                                             A venda foi registrada normalmente. Apenas a NFC-e não foi emitida.
                                         </p>
+                                        {reciboAtual.nfce.debug && (
+                                            <details className="text-[10px] text-amber-900/80 mt-2">
+                                                <summary className="cursor-pointer font-semibold">Debug homologação — clique para expandir</summary>
+                                                <p className="mt-1 font-semibold">Payload enviado:</p>
+                                                <pre className="whitespace-pre-wrap break-all bg-amber-100/60 p-1 rounded max-h-40 overflow-auto">
+{JSON.stringify(reciboAtual.nfce.debug.payloadEnviado, null, 2)}
+                                                </pre>
+                                                <p className="mt-1 font-semibold">Resposta crua (HTTP {reciboAtual.nfce.debug.statusHttp}):</p>
+                                                <pre className="whitespace-pre-wrap break-all bg-amber-100/60 p-1 rounded max-h-40 overflow-auto">
+{JSON.stringify(reciboAtual.nfce.debug.respostaCrua, null, 2)}
+                                                </pre>
+                                            </details>
+                                        )}
                                     </div>
                                 )
                             )}
