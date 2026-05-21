@@ -689,13 +689,25 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                                         )}
                                     </div>
                                     {impressora.suportado && !impressora.conectada && (
-                                        <button
-                                            onClick={impressora.parear}
-                                            className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-extrabold text-sm transition-all active:scale-[0.98] shadow-sm flex items-center justify-center gap-2"
-                                        >
-                                            <Printer className="w-5 h-5" />
-                                            Conectar Impressora
-                                        </button>
+                                        <div className="space-y-2">
+                                            <button
+                                                onClick={impressora.parear}
+                                                className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-extrabold text-sm transition-all active:scale-[0.98] shadow-sm flex items-center justify-center gap-2"
+                                            >
+                                                <Printer className="w-5 h-5" />
+                                                Conectar Impressora (USB)
+                                            </button>
+                                            <button
+                                                onClick={impressora.pearSerial}
+                                                className="w-full py-2.5 bg-white border-2 border-blue-400 text-blue-700 hover:bg-blue-50 rounded-xl font-bold text-xs transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                                            >
+                                                <Printer className="w-4 h-4" />
+                                                Tentar via Porta Serial (COM)
+                                            </button>
+                                            <p className="text-[10px] text-gray-500 text-center">
+                                                Se USB der &quot;Access Denied&quot;, use a opcao Porta Serial.
+                                            </p>
+                                        </div>
                                     )}
                                     {impressora.conectada && (
                                         <button

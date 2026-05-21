@@ -20,6 +20,14 @@ import ReceiptPrinterEncoder from '@point-of-sale/receipt-printer-encoder'
 // adivinhar vendorId/productId fabricante por fabricante.
 const PRINTER_USB_CLASS_FILTER: USBDeviceFilter[] = [{ classCode: 7 }]
 
+// Tipo unificado: a "impressora" pode ser USB direto OU porta serial virtual.
+// No Windows, quando o driver da impressora reivindica o USB exclusivamente
+// (causando "Access Denied" no WebUSB.open), a porta serial virtual e o
+// caminho de saida — ela e exposta como COM port pelo proprio driver.
+export type ImpressoraPareada =
+    | { tipo: 'usb'; device: USBDevice }
+    | { tipo: 'serial'; port: SerialPort }
+
 export interface DadosImpressaoNFCe {
     razaoSocial: string
     cnpj: string
@@ -46,32 +54,54 @@ export function webUsbDisponivel(): boolean {
     return typeof navigator !== 'undefined' && 'usb' in navigator
 }
 
-// Devolve o primeiro device ja autorizado pelo usuario, ou null.
-// E sincrono apos a 1a vez — usado pra silent print em background.
-export async function obterImpressoraPareada(): Promise<USBDevice | null> {
-    if (!webUsbDisponivel()) return null
-    try {
-        const devices = await navigator.usb.getDevices()
-        return devices[0] ?? null
-    } catch {
-        return null
-    }
+// True quando o navegador tem WebSerial disponivel.
+export function webSerialDisponivel(): boolean {
+    return typeof navigator !== 'undefined' && 'serial' in navigator
 }
 
-// Pede ao usuario pra escolher a impressora. So pode ser chamado a partir
-// de um gesto de usuario (click). Popup nativo do Chrome lista USBs.
-export async function pedirImpressora(): Promise<USBDevice | null> {
+// Devolve a 1a impressora pareada (USB ou Serial), ou null.
+export async function obterImpressoraPareada(): Promise<ImpressoraPareada | null> {
+    if (webUsbDisponivel()) {
+        try {
+            const devices = await navigator.usb.getDevices()
+            if (devices.length > 0) return { tipo: 'usb', device: devices[0] }
+        } catch {}
+    }
+    if (webSerialDisponivel()) {
+        try {
+            const ports = await navigator.serial.getPorts()
+            if (ports.length > 0) return { tipo: 'serial', port: ports[0] }
+        } catch {}
+    }
+    return null
+}
+
+// Pede ao usuario pra escolher impressora USB. Popup nativo do Chrome.
+// Pode falhar com "Access Denied" no Windows se driver kernel-mode segura
+// o device exclusivamente — nesse caso, use pedirImpressoraSerial().
+export async function pedirImpressoraUSB(): Promise<USBDevice | null> {
     if (!webUsbDisponivel()) {
         throw new Error('WebUSB nao disponivel — abra o sistema no Chrome ou Edge.')
     }
     try {
-        const device = await navigator.usb.requestDevice({ filters: PRINTER_USB_CLASS_FILTER })
-        return device
+        return await navigator.usb.requestDevice({ filters: PRINTER_USB_CLASS_FILTER })
     } catch (err: any) {
-        if (err?.name === 'NotFoundError') {
-            // usuario clicou em Cancelar — nao e erro
-            return null
-        }
+        if (err?.name === 'NotFoundError') return null
+        throw err
+    }
+}
+
+// Pede ao usuario pra escolher uma porta COM (serial). Popup do Chrome.
+// Funciona quando o driver da impressora expoe porta serial virtual —
+// o caminho recomendado no Windows quando WebUSB direto falha.
+export async function pedirImpressoraSerial(): Promise<SerialPort | null> {
+    if (!webSerialDisponivel()) {
+        throw new Error('WebSerial nao disponivel — abra o sistema no Chrome ou Edge.')
+    }
+    try {
+        return await navigator.serial.requestPort()
+    } catch (err: any) {
+        if (err?.name === 'NotFoundError') return null
         throw err
     }
 }
@@ -207,16 +237,32 @@ function formatBRL(v: number): string {
     return v.toFixed(2).replace('.', ',')
 }
 
-// Imprime o DANFE NFC-e enviando bytes ESC/POS via WebUSB.
-// Throw se falhar (rede USB, papel travado, device desconectado).
-export async function imprimirNFCe(device: USBDevice, dados: DadosImpressaoNFCe): Promise<void> {
-    const { endpointNumber } = await prepararEndpointEscrita(device)
+// Imprime o DANFE NFC-e enviando bytes ESC/POS pra qualquer impressora
+// pareada (USB ou Serial). Throw se falhar.
+export async function imprimirNFCe(impressora: ImpressoraPareada, dados: DadosImpressaoNFCe): Promise<void> {
     const bytes = montarCupomEscPos(dados)
-    // Copia pra ArrayBuffer "puro" (nao SharedArrayBuffer) — WebUSB exige
-    const buffer = new ArrayBuffer(bytes.byteLength)
-    new Uint8Array(buffer).set(bytes)
-    const result = await device.transferOut(endpointNumber, buffer)
-    if (result.status !== 'ok') {
-        throw new Error(`Falha ao enviar dados pra impressora (status: ${result.status})`)
+    if (impressora.tipo === 'usb') {
+        const { endpointNumber } = await prepararEndpointEscrita(impressora.device)
+        const buffer = new ArrayBuffer(bytes.byteLength)
+        new Uint8Array(buffer).set(bytes)
+        const result = await impressora.device.transferOut(endpointNumber, buffer)
+        if (result.status !== 'ok') {
+            throw new Error(`Falha ao enviar dados (status USB: ${result.status})`)
+        }
+        return
+    }
+    // SERIAL: abre porta, escreve bytes, fecha
+    const port = impressora.port
+    if (!port.readable) {
+        // porta nao aberta — abre com baudrate padrao de termicas (9600 ou 38400)
+        await port.open({ baudRate: 9600 })
+    }
+    const writer = port.writable!.getWriter()
+    try {
+        const buffer = new ArrayBuffer(bytes.byteLength)
+        new Uint8Array(buffer).set(bytes)
+        await writer.write(new Uint8Array(buffer))
+    } finally {
+        writer.releaseLock()
     }
 }
