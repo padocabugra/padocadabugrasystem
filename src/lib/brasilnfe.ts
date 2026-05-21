@@ -131,7 +131,9 @@ export async function emitirNFCe(dados: DadosNFCe): Promise<ResultadoNFCe> {
             const valorTotal = Math.round(quantidade * valorUnitario * 100) / 100
             const ean = normalizarEAN(item.ean)
             return {
-                CodProduto: sanitizarCodigoProduto(item.codigo),
+                // Nome confirmado pelo suporte da Brasil NFe (2026-05-21).
+                // Doc publica usa CodProduto, mas a API exige CodProdutoServico.
+                CodProdutoServico: sanitizarCodigoProduto(item.codigo),
                 NmProduto: sanitizarNomeProduto(item.nome),
                 EANComercial: ean,
                 EANTributavel: ean,
