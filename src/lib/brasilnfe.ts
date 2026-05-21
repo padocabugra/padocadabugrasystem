@@ -9,6 +9,8 @@ export interface ItemNFCe {
     /** Código do produto (cProd). Pode ser SKU cadastrado ou id sanitizado como fallback. */
     codigo: string
     nome: string
+    /** EAN/GTIN do produto (cEAN). Se ausente ou inválido, vai como "SEM GTIN". */
+    ean?: string | null
     ncm?: string
     cfop?: number
     csosn?: string
@@ -29,6 +31,25 @@ export function sanitizarCodigoProduto(input: string): string {
         .toUpperCase()
         .slice(0, 60)
     return limpo || 'SEM-CODIGO'
+}
+
+// EAN/GTIN da SEFAZ aceita "SEM GTIN" (NT 2020.006) ou 8/12/13/14 dígitos com DV válido.
+// Não valida o dígito verificador aqui; só checa o comprimento e que sejam só dígitos.
+function normalizarEAN(input?: string | null): string {
+    const apenasDigitos = (input ?? '').replace(/\D/g, '')
+    if ([8, 12, 13, 14].includes(apenasDigitos.length)) return apenasDigitos
+    return 'SEM GTIN'
+}
+
+// CSOSN é SEMPRE 3 dígitos (102, 103, 300, 400, 500, 900 para NFC-e).
+// Telas costumam mostrar "0102" = Origem(0) + CSOSN(102), mas no payload os
+// campos são separados. Este helper extrai os 3 últimos dígitos se vier
+// concatenado, mantendo CSOSN puro.
+function normalizarCSOSN(input?: string | null): string {
+    const digitos = (input ?? '').replace(/\D/g, '')
+    if (digitos.length === 4) return digitos.slice(1)   // "0102" → "102"
+    if (digitos.length === 3) return digitos
+    return '102'
 }
 
 export interface DadosNFCe {
@@ -76,21 +97,37 @@ export async function emitirNFCe(dados: DadosNFCe): Promise<ResultadoNFCe> {
         Cliente: dados.cpfCliente
             ? { CpfCnpj: dados.cpfCliente, IndicadorIe: 9 }
             : null,
-        Produtos: dados.itens.map((item) => ({
-            CodProduto: sanitizarCodigoProduto(item.codigo),
-            NmProduto: item.nome,
-            NCM: item.ncm || '21069090',
-            CFOP: item.cfop || 5102,
-            Quantidade: item.quantidade,
-            ValorUnitario: item.valorUnitario,
-            UnidadeComercial: (item.unidade || 'UN').toUpperCase(),
-            OrigemProduto: 0,
-            Imposto: {
-                ICMS: {
-                    CodSituacaoTributaria: item.csosn || '0102',
+        Produtos: dados.itens.map((item) => {
+            const unidade = (item.unidade || 'UN').toUpperCase()
+            const quantidade = Number(item.quantidade)
+            const valorUnitario = Number(item.valorUnitario)
+            // vProd é arredondado a 2 casas; a SEFAZ rejeita se o somatório
+            // do vProd dos itens divergir do total da nota.
+            const valorTotal = Math.round(quantidade * valorUnitario * 100) / 100
+            const ean = normalizarEAN(item.ean)
+            return {
+                CodProduto: sanitizarCodigoProduto(item.codigo),
+                NmProduto: item.nome,
+                EANComercial: ean,
+                EANTributavel: ean,
+                NCM: item.ncm || '21069090',
+                CFOP: item.cfop || 5102,
+                Quantidade: quantidade,
+                ValorUnitario: valorUnitario,
+                ValorTotalProduto: valorTotal,
+                UnidadeComercial: unidade,
+                QuantidadeTributavel: quantidade,
+                UnidadeTributavel: unidade,
+                ValorUnitarioTributavel: valorUnitario,
+                IndicadorTotal: 1,
+                OrigemProduto: 0,
+                Imposto: {
+                    ICMS: {
+                        CodSituacaoTributaria: normalizarCSOSN(item.csosn),
+                    },
                 },
-            },
-        })),
+            }
+        }),
         Pagamentos: [
             {
                 IndicadorPagamento: 0,
@@ -111,6 +148,14 @@ export async function emitirNFCe(dados: DadosNFCe): Promise<ResultadoNFCe> {
         })
 
         const json: any = await res.json().catch(() => null)
+
+        // Em homologação registramos request+response completos pra debug
+        // de rejeições da SEFAZ. A doc da Brasil NFe não cobre todos os
+        // campos; o response é a única fonte autoritativa pra diagnosticar.
+        if (ambiente === 2) {
+            console.log('[brasilnfe] payload →', JSON.stringify(payload))
+            console.log('[brasilnfe] response (status %d) ←', res.status, JSON.stringify(json))
+        }
 
         if (!res.ok) {
             const erro =
