@@ -38,11 +38,6 @@ interface NfceInfo {
     chaveAcesso?: string
     danfeUrl?: string
     erro?: string
-    debug?: {
-        statusHttp: number
-        payloadEnviado: unknown
-        respostaCrua: unknown
-    }
 }
 
 interface ReciboFinal {
@@ -391,7 +386,7 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                             <input
                                 type="text"
-                                placeholder="Buscar produto (nome, código)..."
+                                placeholder="Buscar produto, digitar ou bipar código..."
                                 value={busca}
                                 onChange={(e) => setBusca(e.target.value)}
                                 className="w-full pl-9 pr-4 h-11 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 outline-none"
@@ -749,19 +744,6 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                                         <p className="text-[11px] text-amber-700/70">
                                             A venda foi registrada normalmente.
                                         </p>
-                                        {recibo.nfce.debug && (
-                                            <details className="text-[10px] text-amber-900/80 mt-2">
-                                                <summary className="cursor-pointer font-semibold">Debug homologação — clique para expandir</summary>
-                                                <p className="mt-1 font-semibold">Payload enviado:</p>
-                                                <pre className="whitespace-pre-wrap break-all bg-amber-100/60 p-1 rounded max-h-40 overflow-auto">
-{JSON.stringify(recibo.nfce.debug.payloadEnviado, null, 2)}
-                                                </pre>
-                                                <p className="mt-1 font-semibold">Resposta crua (HTTP {recibo.nfce.debug.statusHttp}):</p>
-                                                <pre className="whitespace-pre-wrap break-all bg-amber-100/60 p-1 rounded max-h-40 overflow-auto">
-{JSON.stringify(recibo.nfce.debug.respostaCrua, null, 2)}
-                                                </pre>
-                                            </details>
-                                        )}
                                     </div>
                                 )
                             )}
