@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react'
 import { useForm, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { X, Loader2, Save, Trash2, ChevronDown, ChevronRight } from 'lucide-react'
+import { X, Loader2, Save, Trash2, ChevronDown, ChevronRight, ScanLine, CheckCircle2, AlertTriangle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { isValidEAN13 } from '@/lib/formatters'
 import {
     produtoSchema,
     type ProdutoFormData,
@@ -187,12 +188,21 @@ export default function ModalProduto({
                         </div>
 
                         <div className="space-y-1.5">
-                            <label className="text-sm font-medium text-gray-700">Código (SKU)</label>
+                            <label className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+                                <ScanLine className="w-3.5 h-3.5 text-gray-500" />
+                                Código de Barras / SKU
+                            </label>
                             <input
                                 {...register('codigo')}
                                 className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-200 outline-none font-mono"
-                                placeholder="Ex: PAO-001"
+                                placeholder="Ex: 7891000100103 ou PAO-FRA-50"
                             />
+                            <CodigoFeedback codigo={watch('codigo')} />
+                            <p className="text-[11px] text-gray-400 leading-snug">
+                                Use o EAN-13 impresso na embalagem (refrigerantes, leites, etc.) ou um
+                                código interno (ex: <span className="font-mono">PAO-FRA-50</span>) pra
+                                produtos sem código de barras. Quando o scanner chegar, é só bipar nesse mesmo campo.
+                            </p>
                         </div>
 
                         <div className="space-y-1.5">
@@ -499,5 +509,48 @@ export default function ModalProduto({
                 </form>
             </div>
         </div>
+    )
+}
+
+// Feedback inline pra ajudar a Bugra a saber se o que digitou é EAN-13 válido
+// ou se é apenas um SKU interno (qualquer outro formato).
+function CodigoFeedback({ codigo }: { codigo?: string }) {
+    const valor = (codigo ?? '').trim()
+    if (!valor) return null
+
+    // 13 dígitos exatos = tentativa de EAN-13
+    if (/^\d{13}$/.test(valor)) {
+        if (isValidEAN13(valor)) {
+            return (
+                <p className="text-[11px] font-semibold text-emerald-700 flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    EAN-13 válido
+                </p>
+            )
+        }
+        return (
+            <p className="text-[11px] font-semibold text-amber-700 flex items-center gap-1">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                EAN-13 inválido — confira o último dígito da embalagem
+            </p>
+        )
+    }
+
+    // Só números mas não 13 dígitos — pode ser EAN-8, código truncado ou em digitação
+    if (/^\d+$/.test(valor) && valor.length !== 12) {
+        return (
+            <p className="text-[11px] text-gray-500">
+                {valor.length < 13
+                    ? `${valor.length}/13 dígitos — EAN-13 tem 13 dígitos`
+                    : `${valor.length} dígitos — formato não reconhecido como EAN-13`}
+            </p>
+        )
+    }
+
+    // Outro formato = SKU interno
+    return (
+        <p className="text-[11px] text-gray-500">
+            Tratado como SKU interno (código não-EAN)
+        </p>
     )
 }

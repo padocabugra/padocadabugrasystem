@@ -1,22 +1,25 @@
 'use client'
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import { Plus, Search, Archive, Package, FileCheck, AlertCircle } from 'lucide-react'
+import { Plus, Search, Archive, Package, FileCheck, AlertCircle, ChefHat, CheckSquare, Square, X as IconX, Eye, EyeOff, ScanLine } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useDebounce } from '@/hooks/useDebounce'
-import { formatCurrency } from '@/lib/formatters'
+import { formatCurrency, isValidEAN13 } from '@/lib/formatters'
 import { toast } from 'sonner'
 import ModalProduto from '@/components/produtos/ModalProduto'
 import type { Produto } from '@/lib/types/produto'
 
-type FiltroDisponivel = 'todos' | 'venda' | 'insumo'
+type FiltroDisponivel = 'todos' | 'venda' | 'insumo' | 'sem_codigo'
 
 export default function ProdutosPage() {
     const [produtos, setProdutos] = useState<Produto[]>([])
+    const [produtosEmReceita, setProdutosEmReceita] = useState<Set<string>>(new Set())
     const [loading, setLoading] = useState(true)
     const [searchTerm, setSearchTerm] = useState('')
     const [filtroDisponivel, setFiltroDisponivel] = useState<FiltroDisponivel>('todos')
     const [togglingId, setTogglingId] = useState<string | null>(null)
+    const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
+    const [bulkUpdating, setBulkUpdating] = useState(false)
     // Estado do modal
     const [isModalOpen, setIsModalOpen] = useState(false)
     const [editingProduto, setEditingProduto] = useState<Produto | null>(null)
@@ -38,19 +41,40 @@ export default function ProdutosPage() {
             query = query.or(`nome.ilike.%${debouncedSearch}%,categoria.ilike.%${debouncedSearch}%`)
         }
 
-        const { data, error } = await query
+        const [produtosRes, receitasRes] = await Promise.all([
+            query,
+            supabase.from('receitas').select('ingredientes'),
+        ])
 
-        if (error) {
-            console.error('Erro ao buscar produtos:', error)
+        if (produtosRes.error) {
+            console.error('Erro ao buscar produtos:', produtosRes.error)
         } else {
-            setProdutos(data as Produto[])
+            setProdutos(produtosRes.data as Produto[])
         }
+
+        if (!receitasRes.error && receitasRes.data) {
+            // Extrai produto_id de todos os ingredientes de todas as receitas (jsonb)
+            const ids = new Set<string>()
+            for (const r of receitasRes.data as Array<{ ingredientes: unknown }>) {
+                const ings = Array.isArray(r.ingredientes) ? r.ingredientes : []
+                for (const ing of ings as Array<{ produto_id?: string }>) {
+                    if (ing?.produto_id) ids.add(ing.produto_id)
+                }
+            }
+            setProdutosEmReceita(ids)
+        }
+
         setLoading(false)
     }, [debouncedSearch])
 
     useEffect(() => {
         fetchProdutos()
     }, [fetchProdutos])
+
+    // Limpa seleção quando o filtro muda (evita confusão com itens fora da view)
+    useEffect(() => {
+        setSelecionados(new Set())
+    }, [filtroDisponivel, debouncedSearch])
 
     function handleNovo() {
         setEditingProduto(null)
@@ -91,8 +115,92 @@ export default function ProdutosPage() {
     const produtosFiltrados = useMemo(() => {
         if (filtroDisponivel === 'todos') return produtos
         if (filtroDisponivel === 'venda') return produtos.filter((p) => p.disponivel_venda !== false)
+        if (filtroDisponivel === 'sem_codigo') return produtos.filter((p) => !p.codigo || p.codigo.trim() === '')
         return produtos.filter((p) => p.disponivel_venda === false)
     }, [produtos, filtroDisponivel])
+
+    const produtosSemCodigo = useMemo(() => {
+        return produtos.filter((p) => !p.codigo || p.codigo.trim() === '').length
+    }, [produtos])
+
+    function toggleSelecionado(id: string, e: React.MouseEvent | React.ChangeEvent) {
+        e.stopPropagation()
+        setSelecionados((prev) => {
+            const next = new Set(prev)
+            if (next.has(id)) next.delete(id)
+            else next.add(id)
+            return next
+        })
+    }
+
+    const todosVisiveisSelecionados = produtosFiltrados.length > 0
+        && produtosFiltrados.every((p) => selecionados.has(p.id))
+
+    function toggleSelecionarTodosVisiveis() {
+        if (todosVisiveisSelecionados) {
+            // Remove só os visíveis da seleção
+            setSelecionados((prev) => {
+                const next = new Set(prev)
+                produtosFiltrados.forEach((p) => next.delete(p.id))
+                return next
+            })
+        } else {
+            setSelecionados((prev) => {
+                const next = new Set(prev)
+                produtosFiltrados.forEach((p) => next.add(p.id))
+                return next
+            })
+        }
+    }
+
+    function selecionarCandidatosInsumo() {
+        // Atalho: seleciona produtos visíveis que aparecem como ingrediente em receita
+        // E que ainda estão marcados como "disponível para venda" (candidatos a marcar como insumo)
+        setSelecionados((prev) => {
+            const next = new Set(prev)
+            produtosFiltrados
+                .filter((p) => produtosEmReceita.has(p.id) && p.disponivel_venda !== false)
+                .forEach((p) => next.add(p.id))
+            return next
+        })
+    }
+
+    async function handleBulkSetDisponivel(novoValor: boolean) {
+        const ids = Array.from(selecionados)
+        if (ids.length === 0) return
+
+        const acao = novoValor ? 'disponíveis para venda' : 'uso interno'
+        if (!confirm(`Marcar ${ids.length} produto(s) como ${acao}?`)) return
+
+        setBulkUpdating(true)
+        // Otimista
+        setProdutos((prev) => prev.map((p) =>
+            selecionados.has(p.id) ? { ...p, disponivel_venda: novoValor } : p
+        ))
+
+        const supabase = createClient()
+        const { error } = await supabase
+            .from('produtos')
+            .update({ disponivel_venda: novoValor, updated_at: new Date().toISOString() })
+            .in('id', ids)
+
+        setBulkUpdating(false)
+
+        if (error) {
+            toast.error('Erro na ação em massa: ' + error.message)
+            // Refetch pra reverter estado otimista de forma confiável
+            fetchProdutos()
+        } else {
+            toast.success(`${ids.length} produto(s) marcado(s) como ${acao}`)
+            setSelecionados(new Set())
+        }
+    }
+
+    const candidatosInsumoVisiveis = useMemo(() => {
+        return produtosFiltrados.filter(
+            (p) => produtosEmReceita.has(p.id) && p.disponivel_venda !== false
+        ).length
+    }, [produtosFiltrados, produtosEmReceita])
 
     return (
         <div className="space-y-6">
@@ -127,12 +235,13 @@ export default function ProdutosPage() {
                 </div>
             </div>
 
-            {/* Tabs de filtro disponibilidade */}
-            <div className="flex gap-2 flex-wrap">
+            {/* Tabs de filtro disponibilidade + atalho candidatos a insumo */}
+            <div className="flex gap-2 flex-wrap items-center">
                 {([
                     { value: 'todos' as const, label: 'Todos' },
                     { value: 'venda' as const, label: 'Para venda' },
                     { value: 'insumo' as const, label: 'Uso Interno' },
+                    { value: 'sem_codigo' as const, label: produtosSemCodigo > 0 ? `Sem código (${produtosSemCodigo})` : 'Sem código' },
                 ]).map((f) => (
                     <button
                         key={f.value}
@@ -145,7 +254,52 @@ export default function ProdutosPage() {
                         {f.label}
                     </button>
                 ))}
+
+                {candidatosInsumoVisiveis > 0 && (
+                    <button
+                        onClick={selecionarCandidatosInsumo}
+                        title="Seleciona produtos que aparecem como ingrediente em alguma receita e ainda estão marcados como 'Para venda' — candidatos a virar Uso Interno."
+                        className="ml-auto px-3 py-1.5 rounded-xl text-xs font-semibold border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 transition-all flex items-center gap-1.5"
+                    >
+                        <ChefHat className="w-3.5 h-3.5" />
+                        Selecionar {candidatosInsumoVisiveis} candidato(s) a insumo
+                    </button>
+                )}
             </div>
+
+            {/* Barra de ações em massa (flutua quando há seleção) */}
+            {selecionados.size > 0 && (
+                <div className="sticky top-0 z-20 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex flex-wrap items-center gap-3 shadow-sm">
+                    <span className="text-sm font-semibold text-blue-900">
+                        {selecionados.size} produto(s) selecionado(s)
+                    </span>
+                    <div className="flex-1" />
+                    <button
+                        onClick={() => handleBulkSetDisponivel(false)}
+                        disabled={bulkUpdating}
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold bg-gray-700 hover:bg-gray-800 text-white transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                        <EyeOff className="w-3.5 h-3.5" />
+                        Marcar como Uso Interno
+                    </button>
+                    <button
+                        onClick={() => handleBulkSetDisponivel(true)}
+                        disabled={bulkUpdating}
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                        <Eye className="w-3.5 h-3.5" />
+                        Marcar como Para Venda
+                    </button>
+                    <button
+                        onClick={() => setSelecionados(new Set())}
+                        disabled={bulkUpdating}
+                        className="px-2 py-1.5 rounded-lg text-xs font-medium text-gray-600 hover:bg-gray-100 transition-colors flex items-center gap-1 disabled:opacity-50"
+                    >
+                        <IconX className="w-3.5 h-3.5" />
+                        Limpar seleção
+                    </button>
+                </div>
+            )}
 
             {/* Lista de Produtos (Cards em mobile, Tabela em desktop) */}
             {loading ? (
@@ -164,7 +318,21 @@ export default function ProdutosPage() {
                         <table className="w-full text-left text-sm">
                             <thead className="bg-gray-50 border-b border-gray-100 text-gray-600 uppercase text-xs tracking-wider">
                                 <tr>
+                                    <th className="pl-6 pr-2 py-4 w-10">
+                                        <button
+                                            type="button"
+                                            onClick={toggleSelecionarTodosVisiveis}
+                                            title={todosVisiveisSelecionados ? 'Desmarcar todos visíveis' : 'Selecionar todos visíveis'}
+                                            className="p-1 hover:bg-gray-200 rounded transition-colors"
+                                        >
+                                            {todosVisiveisSelecionados
+                                                ? <CheckSquare className="w-4 h-4 text-primary" />
+                                                : <Square className="w-4 h-4 text-gray-400" />
+                                            }
+                                        </button>
+                                    </th>
                                     <th className="px-6 py-4 font-semibold">Produto</th>
+                                    <th className="px-6 py-4 font-semibold">Código</th>
                                     <th className="px-6 py-4 font-semibold">Categoria</th>
                                     <th className="px-6 py-4 font-semibold text-right">Preço</th>
                                     <th className="px-6 py-4 font-semibold text-right">Estoque</th>
@@ -174,18 +342,42 @@ export default function ProdutosPage() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-50">
-                                {produtosFiltrados.map((produto) => (
+                                {produtosFiltrados.map((produto) => {
+                                    const estaSelecionado = selecionados.has(produto.id)
+                                    const usadoEmReceita = produtosEmReceita.has(produto.id)
+                                    return (
                                     <tr
                                         key={produto.id}
-                                        className="hover:bg-blue-50/50 transition-colors group cursor-pointer"
+                                        className={`transition-colors group cursor-pointer ${estaSelecionado ? 'bg-blue-100 hover:bg-blue-100' : 'hover:bg-blue-50/50'}`}
                                         onClick={() => handleEditar(produto)} // Clica na linha para editar
                                     >
+                                        <td className="pl-6 pr-2 py-4 w-10" onClick={(e) => e.stopPropagation()}>
+                                            <button
+                                                type="button"
+                                                onClick={(e) => toggleSelecionado(produto.id, e)}
+                                                className="p-1 hover:bg-gray-200 rounded transition-colors"
+                                            >
+                                                {estaSelecionado
+                                                    ? <CheckSquare className="w-4 h-4 text-primary" />
+                                                    : <Square className="w-4 h-4 text-gray-300" />
+                                                }
+                                            </button>
+                                        </td>
                                         <td className="px-6 py-4 font-medium text-gray-800">
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-2 flex-wrap">
                                                 <span>{produto.nome}</span>
                                                 {produto.disponivel_venda === false && (
                                                     <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-gray-200 text-gray-600">
                                                         Uso Interno
+                                                    </span>
+                                                )}
+                                                {usadoEmReceita && (
+                                                    <span
+                                                        title="Este produto aparece como ingrediente em alguma receita"
+                                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-700"
+                                                    >
+                                                        <ChefHat className="w-3 h-3" />
+                                                        Em receita
                                                     </span>
                                                 )}
                                                 {/* Indicador fiscal */}
@@ -205,6 +397,9 @@ export default function ProdutosPage() {
                                                     </span>
                                                 )}
                                             </div>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <CodigoCelula codigo={produto.codigo} />
                                         </td>
                                         <td className="px-6 py-4 text-gray-500">
                                             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
@@ -277,7 +472,8 @@ export default function ProdutosPage() {
                                             </button>
                                         </td>
                                     </tr>
-                                ))}
+                                    )
+                                })}
                             </tbody>
                         </table>
                     </div>
@@ -292,5 +488,26 @@ export default function ProdutosPage() {
                 produtoToEdit={editingProduto}
             />
         </div>
+    )
+}
+
+// Renderiza o código do produto na tabela com badge visual:
+// — EAN-13 válido → texto verde com ícone scan
+// — qualquer outro código não-vazio → texto cinza-escuro (SKU interno)
+// — vazio/null → traço cinza-claro (Bugra precisa cadastrar)
+function CodigoCelula({ codigo }: { codigo?: string | null }) {
+    const valor = (codigo ?? '').trim()
+    if (!valor) {
+        return <span className="text-gray-300 font-mono text-xs">—</span>
+    }
+    const ean = isValidEAN13(valor)
+    return (
+        <span
+            className={`inline-flex items-center gap-1 font-mono text-xs ${ean ? 'text-emerald-700' : 'text-gray-600'}`}
+            title={ean ? 'EAN-13 válido' : 'Código interno (SKU)'}
+        >
+            {ean && <ScanLine className="w-3 h-3" />}
+            {valor}
+        </span>
     )
 }
