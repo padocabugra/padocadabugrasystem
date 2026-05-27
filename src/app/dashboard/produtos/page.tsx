@@ -1,12 +1,13 @@
 'use client'
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import { Plus, Search, Archive, Package, FileCheck, AlertCircle, ChefHat, CheckSquare, Square, X as IconX, Eye, EyeOff, ScanLine } from 'lucide-react'
+import { Plus, Search, Archive, Package, FileCheck, AlertCircle, ChefHat, CheckSquare, Square, X as IconX, Eye, EyeOff, ScanLine, MousePointerClick, Trash2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useDebounce } from '@/hooks/useDebounce'
 import { formatCurrency, isValidEAN13 } from '@/lib/formatters'
 import { toast } from 'sonner'
 import ModalProduto from '@/components/produtos/ModalProduto'
+import { registrarAuditLog } from '@/lib/audit-log'
 import type { Produto } from '@/lib/types/produto'
 
 type FiltroDisponivel = 'todos' | 'venda' | 'insumo' | 'sem_codigo'
@@ -20,6 +21,10 @@ export default function ProdutosPage() {
     const [togglingId, setTogglingId] = useState<string | null>(null)
     const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
     const [bulkUpdating, setBulkUpdating] = useState(false)
+    // Modo seleção opt-in: default false → tabela limpa (sem coluna checkbox).
+    // Quando true: coluna checkbox aparece + barra de ações em massa fica disponível.
+    const [modoSelecao, setModoSelecao] = useState(false)
+    const [confirmDelete, setConfirmDelete] = useState(false)
     // Estado do modal
     const [isModalOpen, setIsModalOpen] = useState(false)
     const [editingProduto, setEditingProduto] = useState<Produto | null>(null)
@@ -75,6 +80,11 @@ export default function ProdutosPage() {
     useEffect(() => {
         setSelecionados(new Set())
     }, [filtroDisponivel, debouncedSearch])
+
+    function sairModoSelecao() {
+        setModoSelecao(false)
+        setSelecionados(new Set())
+    }
 
     function handleNovo() {
         setEditingProduto(null)
@@ -202,6 +212,47 @@ export default function ProdutosPage() {
         ).length
     }, [produtosFiltrados, produtosEmReceita])
 
+    // Snapshot dos produtos selecionados (pra modal de confirmação + audit log)
+    const produtosSelecionadosSnapshot = useMemo(
+        () => produtos.filter((p) => selecionados.has(p.id)),
+        [produtos, selecionados]
+    )
+
+    async function handleBulkDelete() {
+        const ids = Array.from(selecionados)
+        if (ids.length === 0) return
+        setBulkUpdating(true)
+
+        const supabase = createClient()
+        const { error } = await supabase.from('produtos').delete().in('id', ids)
+
+        setBulkUpdating(false)
+        setConfirmDelete(false)
+
+        if (error) {
+            // Erros comuns: FK em pedidos/receitas. Mostra mensagem do banco pra orientar.
+            toast.error('Erro ao excluir: ' + error.message, {
+                description: 'Produtos vinculados a pedidos/receitas não podem ser excluídos. Marque como Uso Interno em vez disso.',
+                duration: 8000,
+            })
+            return
+        }
+
+        // Audit log: registra deleção em lote (best-effort, não bloqueia UI)
+        produtosSelecionadosSnapshot.forEach((p) => {
+            registrarAuditLog({
+                acao: 'produto.deletar',
+                entidade: 'produtos',
+                entidade_id: p.id,
+                detalhes: { nome: p.nome, categoria: p.categoria, codigo: p.codigo, bulk: true },
+            })
+        })
+
+        toast.success(`${ids.length} produto(s) excluído(s)`)
+        setSelecionados(new Set())
+        fetchProdutos()
+    }
+
     return (
         <div className="space-y-6">
             {/* Header com Busca e Botão Novo */}
@@ -225,6 +276,23 @@ export default function ProdutosPage() {
                             className="pl-9 pr-4 py-2 rounded-lg border border-gray-200 text-sm w-full sm:w-64 focus:ring-2 focus:ring-blue-100 outline-none transition-all"
                         />
                     </div>
+                    {modoSelecao ? (
+                        <button
+                            onClick={sairModoSelecao}
+                            className="flex items-center justify-center gap-2 px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-sm font-semibold transition-colors"
+                        >
+                            <IconX className="w-4 h-4" />
+                            Sair da Seleção
+                        </button>
+                    ) : (
+                        <button
+                            onClick={() => setModoSelecao(true)}
+                            className="flex items-center justify-center gap-2 px-4 py-2 bg-white border border-primary text-primary hover:bg-primary/5 rounded-lg text-sm font-semibold transition-colors"
+                        >
+                            <MousePointerClick className="w-4 h-4" />
+                            Selecionar
+                        </button>
+                    )}
                     <button
                         onClick={handleNovo}
                         className="flex items-center justify-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg text-sm font-semibold transition-colors shadow-sm"
@@ -255,7 +323,7 @@ export default function ProdutosPage() {
                     </button>
                 ))}
 
-                {candidatosInsumoVisiveis > 0 && (
+                {modoSelecao && candidatosInsumoVisiveis > 0 && (
                     <button
                         onClick={selecionarCandidatosInsumo}
                         title="Seleciona produtos que aparecem como ingrediente em alguma receita e ainda estão marcados como 'Para venda' — candidatos a virar Uso Interno."
@@ -267,9 +335,9 @@ export default function ProdutosPage() {
                 )}
             </div>
 
-            {/* Barra de ações em massa (flutua quando há seleção) */}
-            {selecionados.size > 0 && (
-                <div className="sticky top-0 z-20 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex flex-wrap items-center gap-3 shadow-sm">
+            {/* Barra de ações em massa — só aparece no modo seleção COM itens marcados */}
+            {modoSelecao && selecionados.size > 0 && (
+                <div className="sticky top-0 z-20 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex flex-wrap items-center gap-2 shadow-sm">
                     <span className="text-sm font-semibold text-blue-900">
                         {selecionados.size} produto(s) selecionado(s)
                     </span>
@@ -291,12 +359,20 @@ export default function ProdutosPage() {
                         Marcar como Para Venda
                     </button>
                     <button
+                        onClick={() => setConfirmDelete(true)}
+                        disabled={bulkUpdating}
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-600 hover:bg-red-700 text-white transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Excluir Selecionados
+                    </button>
+                    <button
                         onClick={() => setSelecionados(new Set())}
                         disabled={bulkUpdating}
                         className="px-2 py-1.5 rounded-lg text-xs font-medium text-gray-600 hover:bg-gray-100 transition-colors flex items-center gap-1 disabled:opacity-50"
                     >
                         <IconX className="w-3.5 h-3.5" />
-                        Limpar seleção
+                        Limpar
                     </button>
                 </div>
             )}
@@ -318,69 +394,80 @@ export default function ProdutosPage() {
                         <table className="w-full text-left text-sm">
                             <thead className="bg-gray-50 border-b border-gray-100 text-gray-600 uppercase text-xs tracking-wider">
                                 <tr>
-                                    <th className="pl-6 pr-2 py-4 w-10">
-                                        <button
-                                            type="button"
-                                            onClick={toggleSelecionarTodosVisiveis}
-                                            title={todosVisiveisSelecionados ? 'Desmarcar todos visíveis' : 'Selecionar todos visíveis'}
-                                            className="p-1 hover:bg-gray-200 rounded transition-colors"
-                                        >
-                                            {todosVisiveisSelecionados
-                                                ? <CheckSquare className="w-4 h-4 text-primary" />
-                                                : <Square className="w-4 h-4 text-gray-400" />
-                                            }
-                                        </button>
-                                    </th>
-                                    <th className="px-6 py-4 font-semibold">Produto</th>
-                                    <th className="px-6 py-4 font-semibold">Código</th>
-                                    <th className="px-6 py-4 font-semibold">Categoria</th>
-                                    <th className="px-6 py-4 font-semibold text-right">Preço</th>
-                                    <th className="px-6 py-4 font-semibold text-right">Estoque</th>
-                                    <th className="px-6 py-4 font-semibold text-center">Status</th>
-                                    <th className="px-6 py-4 font-semibold text-center">Disp. Venda</th>
-                                    <th className="px-6 py-4 font-semibold">Ações</th>
+                                    {modoSelecao && (
+                                        <th className="pl-4 pr-2 py-4 w-10">
+                                            <button
+                                                type="button"
+                                                onClick={toggleSelecionarTodosVisiveis}
+                                                title={todosVisiveisSelecionados ? 'Desmarcar todos visíveis' : 'Selecionar todos visíveis'}
+                                                className="p-1 hover:bg-gray-200 rounded transition-colors"
+                                            >
+                                                {todosVisiveisSelecionados
+                                                    ? <CheckSquare className="w-4 h-4 text-primary" />
+                                                    : <Square className="w-4 h-4 text-gray-400" />
+                                                }
+                                            </button>
+                                        </th>
+                                    )}
+                                    <th className="px-4 py-4 font-semibold">Produto</th>
+                                    <th className="px-3 py-4 font-semibold">Código</th>
+                                    <th className="px-3 py-4 font-semibold">Categoria</th>
+                                    <th className="px-3 py-4 font-semibold text-right">Preço</th>
+                                    <th className="px-3 py-4 font-semibold text-right">Estoque</th>
+                                    <th className="px-3 py-4 font-semibold text-center">Disp. Venda</th>
+                                    <th className="px-3 py-4 font-semibold">Ações</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-50">
                                 {produtosFiltrados.map((produto) => {
                                     const estaSelecionado = selecionados.has(produto.id)
                                     const usadoEmReceita = produtosEmReceita.has(produto.id)
+                                    // Em modo seleção, clique na linha alterna seleção. Fora dele, abre o modal de edição.
+                                    const handleRowClick = modoSelecao
+                                        ? (e: React.MouseEvent) => toggleSelecionado(produto.id, e)
+                                        : () => handleEditar(produto)
                                     return (
                                     <tr
                                         key={produto.id}
                                         className={`transition-colors group cursor-pointer ${estaSelecionado ? 'bg-blue-100 hover:bg-blue-100' : 'hover:bg-blue-50/50'}`}
-                                        onClick={() => handleEditar(produto)} // Clica na linha para editar
+                                        onClick={handleRowClick}
                                     >
-                                        <td className="pl-6 pr-2 py-4 w-10" onClick={(e) => e.stopPropagation()}>
-                                            <button
-                                                type="button"
-                                                onClick={(e) => toggleSelecionado(produto.id, e)}
-                                                className="p-1 hover:bg-gray-200 rounded transition-colors"
-                                            >
-                                                {estaSelecionado
-                                                    ? <CheckSquare className="w-4 h-4 text-primary" />
-                                                    : <Square className="w-4 h-4 text-gray-300" />
-                                                }
-                                            </button>
-                                        </td>
-                                        <td className="px-6 py-4 font-medium text-gray-800">
-                                            <div className="flex items-center gap-2 flex-wrap">
-                                                <span>{produto.nome}</span>
+                                        {modoSelecao && (
+                                            <td className="pl-4 pr-2 py-4 w-10" onClick={(e) => e.stopPropagation()}>
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => toggleSelecionado(produto.id, e)}
+                                                    className="p-1 hover:bg-gray-200 rounded transition-colors"
+                                                >
+                                                    {estaSelecionado
+                                                        ? <CheckSquare className="w-4 h-4 text-primary" />
+                                                        : <Square className="w-4 h-4 text-gray-300" />
+                                                    }
+                                                </button>
+                                            </td>
+                                        )}
+                                        <td className="px-4 py-4 font-medium text-gray-800 min-w-0">
+                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                                <span className="truncate">{produto.nome}</span>
+                                                {!produto.ativo && (
+                                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-red-100 text-red-700">
+                                                        Inativo
+                                                    </span>
+                                                )}
                                                 {produto.disponivel_venda === false && (
-                                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-gray-200 text-gray-600">
+                                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-gray-200 text-gray-600">
                                                         Uso Interno
                                                     </span>
                                                 )}
                                                 {usadoEmReceita && (
                                                     <span
                                                         title="Este produto aparece como ingrediente em alguma receita"
-                                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-700"
+                                                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-700"
                                                     >
                                                         <ChefHat className="w-3 h-3" />
                                                         Em receita
                                                     </span>
                                                 )}
-                                                {/* Indicador fiscal */}
                                                 {produto.ncm ? (
                                                     <span
                                                         title={`NCM: ${produto.ncm} | CFOP: ${produto.cfop || '5101'}`}
@@ -398,21 +485,21 @@ export default function ProdutosPage() {
                                                 )}
                                             </div>
                                         </td>
-                                        <td className="px-6 py-4">
+                                        <td className="px-3 py-4">
                                             <CodigoCelula codigo={produto.codigo} />
                                         </td>
-                                        <td className="px-6 py-4 text-gray-500">
-                                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                                        <td className="px-3 py-4 text-gray-500">
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 whitespace-nowrap">
                                                 {produto.categoria}
                                             </span>
                                         </td>
-                                        <td className="px-6 py-4 text-right font-medium text-gray-900">
+                                        <td className="px-3 py-4 text-right font-medium text-gray-900 whitespace-nowrap">
                                             {formatCurrency(produto.preco)}
                                             <div className="text-[10px] text-gray-400 font-normal">
                                                 Custo: {formatCurrency(produto.custo)}
                                             </div>
                                         </td>
-                                        <td className="px-6 py-4 text-right">
+                                        <td className="px-3 py-4 text-right whitespace-nowrap">
                                             <div className="flex flex-col items-end">
                                                 <span
                                                     className={`font-semibold ${Number(produto.estoque_atual) <= Number(produto.estoque_minimo)
@@ -429,17 +516,7 @@ export default function ProdutosPage() {
                                                 )}
                                             </div>
                                         </td>
-                                        <td className="px-6 py-4 text-center">
-                                            <span
-                                                className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${produto.ativo
-                                                    ? 'bg-green-100 text-green-700'
-                                                    : 'bg-red-100 text-red-700'
-                                                    }`}
-                                            >
-                                                {produto.ativo ? 'Ativo' : 'Inativo'}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4 text-center">
+                                        <td className="px-3 py-4 text-center">
                                             <button
                                                 type="button"
                                                 onClick={(e) => handleToggleDisponivel(produto, e)}
@@ -460,7 +537,7 @@ export default function ProdutosPage() {
                                                 </span>
                                             </button>
                                         </td>
-                                        <td className="px-6 py-4">
+                                        <td className="px-3 py-4 whitespace-nowrap">
                                             <button
                                                 onClick={(e) => {
                                                     e.stopPropagation()
@@ -487,6 +564,56 @@ export default function ProdutosPage() {
                 onSuccess={fetchProdutos} // Atualiza lista após salvar
                 produtoToEdit={editingProduto}
             />
+
+            {/* Modal de confirmação — Excluir em massa */}
+            {confirmDelete && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={() => !bulkUpdating && setConfirmDelete(false)}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                        <div className="px-5 py-4 border-b border-gray-100 bg-red-50/60">
+                            <h3 className="font-bold text-gray-900 flex items-center gap-2">
+                                <Trash2 className="w-4 h-4 text-red-600" />
+                                Excluir {selecionados.size} produto(s)?
+                            </h3>
+                            <p className="text-xs text-gray-500 mt-1">
+                                A exclusão é permanente. Produtos usados em pedidos ou receitas não poderão ser excluídos — nesses casos, marque como Uso Interno.
+                            </p>
+                        </div>
+                        <div className="p-5 max-h-[40vh] overflow-y-auto">
+                            <ul className="text-sm text-gray-700 space-y-1">
+                                {produtosSelecionadosSnapshot.slice(0, 20).map((p) => (
+                                    <li key={p.id} className="flex items-center gap-2 truncate">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                                        <span className="truncate">{p.nome}</span>
+                                        <span className="text-xs text-gray-400 ml-auto shrink-0">{p.categoria}</span>
+                                    </li>
+                                ))}
+                                {produtosSelecionadosSnapshot.length > 20 && (
+                                    <li className="text-xs text-gray-400 italic pt-1">
+                                        ... e mais {produtosSelecionadosSnapshot.length - 20} produto(s).
+                                    </li>
+                                )}
+                            </ul>
+                        </div>
+                        <div className="px-5 py-4 bg-gray-50 flex gap-2">
+                            <button
+                                onClick={() => setConfirmDelete(false)}
+                                disabled={bulkUpdating}
+                                className="flex-1 py-2.5 text-gray-700 bg-white border border-gray-200 hover:bg-gray-100 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleBulkDelete}
+                                disabled={bulkUpdating}
+                                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-bold transition-all disabled:opacity-50 flex items-center justify-center gap-1.5"
+                            >
+                                <Trash2 className="w-4 h-4" />
+                                {bulkUpdating ? 'Excluindo...' : 'Excluir definitivamente'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }
