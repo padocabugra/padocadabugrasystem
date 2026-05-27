@@ -360,9 +360,9 @@ export default function EstoquePage() {
                                                     </div>
                                                 </div>
                                             </td>
-                                            {/* Tipo */}
+                                            {/* Tipo — Próprio (teal/esmeralda) vs Insumo (slate neutro) */}
                                             <td className="px-5 py-3">
-                                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${produto.tipo === 'proprio' ? 'bg-blue-100 text-blue-700' : 'bg-sky-100 text-sky-700'}`}>
+                                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${produto.tipo === 'proprio' ? 'bg-teal-100 text-teal-800' : 'bg-slate-200 text-slate-600'}`}>
                                                     {produto.tipo === 'proprio' ? 'Próprio' : 'Insumo'}
                                                 </span>
                                             </td>
@@ -376,9 +376,9 @@ export default function EstoquePage() {
                                                 </div>
                                                 <p className="text-[10px] text-gray-400">Mín: {produto.estoque_minimo} {produto.unidade_medida}</p>
                                             </td>
-                                            {/* Barra de Nível */}
+                                            {/* Barra de Nível — pontas arredondadas */}
                                             <td className="px-5 py-3 w-40">
-                                                <div className="w-full bg-gray-100 rounded-full h-1.5">
+                                                <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
                                                     <div
                                                         className={`h-1.5 rounded-full transition-all ${nivel <= 25 ? 'bg-red-500' : nivel <= 75 ? 'bg-sky-400' : 'bg-emerald-500'}`}
                                                         style={{ width: `${Math.min(nivel, 100)}%` }}

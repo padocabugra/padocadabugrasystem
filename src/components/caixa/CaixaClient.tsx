@@ -1166,8 +1166,11 @@ export default function CaixaClient({
                 </div>
             )}
 
-            {/* ── Layout Principal ── */}
-            <div className="flex flex-col h-[calc(100vh-theme(spacing.16)-theme(spacing.12))] gap-0 -m-3 sm:-m-4 lg:-m-6">
+            {/* ── Layout Principal ──
+                 Desktop (lg+): split-screen tela cheia com scroll independente em cada lado.
+                 Mobile: container cresce com o conteúdo e o body rola, garantindo que os
+                 botões de forma de pagamento e Finalizar Venda fiquem sempre alcançáveis. */}
+            <div className="flex flex-col min-h-[calc(100vh-theme(spacing.16)-theme(spacing.12))] lg:h-[calc(100vh-theme(spacing.16)-theme(spacing.12))] gap-0 -m-3 sm:-m-4 lg:-m-6">
 
                 {/* Header do Caixa */}
                 <header className="flex items-center justify-between gap-2 flex-wrap px-3 sm:px-6 py-3 bg-white border-b border-blue-100 shrink-0">
@@ -1227,7 +1230,7 @@ export default function CaixaClient({
                 </header>
 
                 {/* ── Tela dividida: Pedidos | Conta ── */}
-                <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
+                <div className="flex flex-col lg:flex-row flex-1 lg:overflow-hidden">
 
                     {/* ════ LADO ESQUERDO: Lista de Pedidos Prontos ════ */}
                     <div className="flex flex-col w-full lg:w-[340px] xl:w-[380px] lg:shrink-0 border-b lg:border-b-0 lg:border-r border-blue-50 bg-white overflow-hidden max-h-[45vh] lg:max-h-none">
@@ -1312,7 +1315,7 @@ export default function CaixaClient({
                     </div>
 
                     {/* ════ LADO DIREITO: Detalhes da Conta ════ */}
-                    <div className="flex-1 flex flex-col bg-gray-50/50 overflow-hidden">
+                    <div className="flex-1 flex flex-col bg-gray-50/50 lg:overflow-hidden">
                         {!pedidoSelecionado ? (
                             /* Estado vazio */
                             <div className="flex-1 flex flex-col items-center justify-center gap-3 text-gray-300 p-8">
@@ -1323,7 +1326,7 @@ export default function CaixaClient({
                                 </p>
                             </div>
                         ) : (
-                            <div className="flex flex-col h-full overflow-hidden">
+                            <div className="flex flex-col lg:h-full lg:overflow-hidden">
 
                                 {/* Cabeçalho da Conta */}
                                 <div className="flex items-center justify-between px-5 py-3 bg-white border-b border-blue-50">
@@ -1377,8 +1380,8 @@ export default function CaixaClient({
                                     ))}
                                 </div>
 
-                                {/* Painel de Pagamento */}
-                                <div className="bg-white border-t border-blue-100 p-4 space-y-4">
+                                {/* Painel de Pagamento — shrink-0 garante que nunca seja comprimido */}
+                                <div className="bg-white border-t border-blue-100 p-4 space-y-4 shrink-0">
                                     {/* Total */}
                                     <div className="flex items-center justify-between">
                                         <span className="text-sm font-semibold text-gray-500">Total da Conta</span>

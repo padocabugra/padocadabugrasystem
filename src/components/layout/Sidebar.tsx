@@ -98,7 +98,7 @@ export default function Sidebar({ usuario }: SidebarProps) {
             </div>
 
             {/* Navegação */}
-            <nav className="flex-1 p-3 space-y-1 overflow-y-auto scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
+            <nav className="sidebar-nav flex-1 p-3 space-y-1 overflow-y-auto">
                 {visibleItems.map((item: NavItem) => {
                     const Icon = ICON_MAP[item.href] ?? LayoutDashboard
                     const isFichas = pathname.startsWith('/dashboard/producao/receitas')

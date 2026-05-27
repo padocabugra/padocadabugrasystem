@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Search, UserCheck, UserX, User } from 'lucide-react'
+import { Search, UserCheck, UserX } from 'lucide-react'
 
 interface ClienteEncontrado {
     id: string
@@ -67,8 +67,6 @@ export default function BuscaClienteCPF({ onClienteSelect, clienteSelecionado }:
 
     return (
         <div className="space-y-3">
-            <p className="text-sm font-semibold text-gray-700">1. Identificar Cliente</p>
-
             {/* Input + Botão Buscar */}
             <div className="flex gap-2">
                 <input
@@ -103,36 +101,23 @@ export default function BuscaClienteCPF({ onClienteSelect, clienteSelecionado }:
 
             {/* Cliente encontrado */}
             {clienteSelecionado && (
-                <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-green-50 border border-green-200">
-                    <div className="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center shrink-0">
+                <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-teal-50 border border-teal-200">
+                    <div className="w-10 h-10 rounded-full bg-teal-600 flex items-center justify-center shrink-0">
                         <UserCheck className="w-5 h-5 text-white" />
                     </div>
                     <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-green-800 truncate">{clienteSelecionado.nome}</p>
-                        <p className="text-xs text-green-600">
+                        <p className="font-semibold text-teal-800 truncate">{clienteSelecionado.nome}</p>
+                        <p className="text-xs text-teal-700">
                             ⭐ {clienteSelecionado.pontos_fidelidade} pontos · {clienteSelecionado.whatsapp ?? 'Sem WhatsApp'}
                         </p>
                     </div>
                     <button
                         onClick={handleClientePadrao}
-                        className="text-xs text-green-600 font-medium hover:text-green-800 transition-colors touch-manipulation p-2"
+                        className="text-xs text-teal-700 font-medium hover:text-teal-900 transition-colors touch-manipulation p-2"
                     >
                         Trocar
                     </button>
                 </div>
-            )}
-
-            {/* Cliente Padrão / Balcão */}
-            {!clienteSelecionado && (
-                <button
-                    onClick={handleClientePadrao}
-                    className="w-full h-12 rounded-xl border-2 border-dashed border-blue-200 bg-blue-50/50
-                               flex items-center justify-center gap-2 text-sm font-medium text-blue-600
-                               active:scale-95 transition-all touch-manipulation"
-                >
-                    <User className="w-4 h-4" />
-                    Cliente Padrão / Balcão (sem identificação)
-                </button>
             )}
         </div>
     )

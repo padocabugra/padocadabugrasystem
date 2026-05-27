@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { ClipboardList, Clock, CheckCircle2, ChevronRight, Bell, Truck, MapPin, Filter } from 'lucide-react'
+import { ClipboardList, Clock, CheckCircle2, ChevronRight, Bell, Truck, MapPin, Filter, Grid } from 'lucide-react'
 import { formatCurrency } from '@/lib/formatters'
 import type { TipoPedido } from '@/lib/types/pedidos'
 import { toast } from 'sonner'
@@ -75,37 +75,45 @@ export default function ListaPedidosClient({ pedidosIniciais, filtroTipoInicial 
 
     return (
         <div className="flex flex-col gap-3">
-            {/* Filtro por tipo */}
+            {/* Filtro por tipo — pastéis combinando com identidade (slate / teal / amber) */}
             <div className="flex items-center gap-2 flex-wrap">
                 <Filter className="w-4 h-4 text-gray-400 shrink-0" />
                 {([
-                    { value: 'todos' as const, label: 'Todos', icon: null },
-                    { value: 'local' as const, label: 'Local', icon: MapPin },
-                    { value: 'delivery' as const, label: 'Delivery', icon: Truck },
-                ]).map((f) => (
-                    <button
-                        key={f.value}
-                        onClick={() => setFiltroTipo(f.value)}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${filtroTipo === f.value
-                                ? f.value === 'delivery'
-                                    ? 'bg-[#054F77] border-[#054F77] text-white'
-                                    : 'bg-blue-600 border-blue-600 text-white'
-                                : 'bg-white border-gray-200 text-gray-600 hover:border-blue-300'
-                            }`}
-                    >
-                        {f.icon && <f.icon className="w-3 h-3" />}
-                        {f.label}
-                    </button>
-                ))}
+                    { value: 'todos' as const, label: 'Todos', icon: Grid,    bg: 'bg-slate-100', bgActive: 'bg-slate-300', text: 'text-slate-800' },
+                    { value: 'local' as const, label: 'Local', icon: MapPin,  bg: 'bg-teal-50',   bgActive: 'bg-teal-200',  text: 'text-teal-800' },
+                    { value: 'delivery' as const, label: 'Delivery', icon: Truck, bg: 'bg-amber-50', bgActive: 'bg-amber-200', text: 'text-amber-800' },
+                ]).map((f) => {
+                    const isActive = filtroTipo === f.value
+                    const Icon = f.icon
+                    return (
+                        <button
+                            key={f.value}
+                            onClick={() => setFiltroTipo(f.value)}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs transition-all duration-200
+                                ${isActive
+                                    ? `${f.bgActive} ${f.text} font-bold shadow-sm`
+                                    : `${f.bg} ${f.text} font-medium opacity-80 hover:opacity-100`
+                                }`}
+                        >
+                            <Icon className="w-3 h-3" />
+                            {f.label}
+                        </button>
+                    )
+                })}
                 <span className="text-xs text-gray-400 ml-2 shrink-0">
                     {pedidosFiltrados.length} pedido{pedidosFiltrados.length !== 1 ? 's' : ''}
                 </span>
             </div>
 
             {!pedidosFiltrados || pedidosFiltrados.length === 0 ? (
-                <div className="flex flex-col items-center justify-center gap-3 py-20 text-gray-400 bg-white rounded-3xl border border-blue-50">
-                    <ClipboardList className="w-12 h-12 opacity-30" />
-                    <p className="text-sm">Nenhum pedido registrado ainda.</p>
+                <div className="flex flex-col items-center justify-center gap-4 py-20 bg-white rounded-3xl border border-blue-50">
+                    <div className="w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center">
+                        <ClipboardList className="w-10 h-10 text-slate-400" />
+                    </div>
+                    <div className="text-center">
+                        <p className="text-base font-bold text-slate-700">Nenhum pedido ainda. Bora vender!</p>
+                        <p className="text-xs text-slate-400 mt-1">Os pedidos aparecerão aqui em tempo real.</p>
+                    </div>
                 </div>
             ) : (
                 <div className="grid gap-3">

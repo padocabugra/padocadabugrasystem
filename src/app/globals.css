@@ -172,6 +172,36 @@
   }
 }
 
+/* ────────────────────────────────────────────────────────────────
+   Sidebar — scrollbar customizada (auto-hide, sutil)
+   Aparece no hover do aside; thumb branco translúcido sobre azul-petróleo
+   ──────────────────────────────────────────────────────────────── */
+.sidebar-nav {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 200ms ease;
+}
+.sidebar-nav::-webkit-scrollbar {
+  width: 4px;
+}
+.sidebar-nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-nav::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+  transition: background 200ms ease;
+}
+aside:hover .sidebar-nav {
+  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+}
+aside:hover .sidebar-nav::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.25);
+}
+.sidebar-nav::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.45);
+}
+
 @layer components {
   /* Utility Classes Padoca CRM */
   .input-padoca {

@@ -1,8 +1,20 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus, Scale } from 'lucide-react'
+import { Plus, Scale, Grid, Coffee, Cookie, Sandwich, Croissant, Package } from 'lucide-react'
 import type { Produto } from '@/lib/types'
+
+// Estilo pastel por categoria — fundo (não selecionado), fundo intensificado
+// (selecionado) e ícone Lucide. Categorias fora da lista caem no fallback slate.
+const CATEGORIA_STYLE: Record<string, { bg: string; bgActive: string; text: string; icon: React.ElementType }> = {
+    'Todos':    { bg: 'bg-slate-100',  bgActive: 'bg-slate-300',  text: 'text-slate-800',   icon: Grid },
+    'Bebidas':  { bg: 'bg-sky-100',    bgActive: 'bg-sky-200',    text: 'text-sky-800',     icon: Coffee },
+    'Doces':    { bg: 'bg-pink-50',    bgActive: 'bg-pink-200',   text: 'text-pink-800',    icon: Cookie },
+    'Lanches':  { bg: 'bg-amber-50',   bgActive: 'bg-amber-200',  text: 'text-amber-800',   icon: Sandwich },
+    'Salgados': { bg: 'bg-orange-50',  bgActive: 'bg-orange-200', text: 'text-orange-800',  icon: Croissant },
+    'Outros':   { bg: 'bg-gray-100',   bgActive: 'bg-gray-300',   text: 'text-gray-800',    icon: Package },
+}
+const CATEGORIA_FALLBACK = { bg: 'bg-slate-100', bgActive: 'bg-slate-300', text: 'text-slate-800', icon: Package }
 
 interface CatalogoProdutosProps {
     produtos: Produto[]
@@ -42,21 +54,28 @@ export default function CatalogoProdutos({ produtos, onAddProduto, hideHeader }:
                            focus:outline-none focus:ring-2 focus:ring-primary/40"
             />
 
-            {/* Abas por categoria */}
+            {/* Abas por categoria — pastel + ícone, intensifica quando ativa */}
             <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none -mx-1 px-1">
-                {categorias.map((cat) => (
-                    <button
-                        key={cat}
-                        onClick={() => setAbaAtiva(cat)}
-                        className={`shrink-0 h-9 px-4 rounded-full text-sm font-medium transition-all touch-manipulation
-                            ${abaAtiva === cat
-                                ? 'bg-primary text-white shadow-sm'
-                                : 'bg-white border border-blue-100 text-gray-600 hover:border-primary hover:text-primary'
-                            }`}
-                    >
-                        {cat}
-                    </button>
-                ))}
+                {categorias.map((cat) => {
+                    const style = CATEGORIA_STYLE[cat] ?? CATEGORIA_FALLBACK
+                    const Icon = style.icon
+                    const isActive = abaAtiva === cat
+                    return (
+                        <button
+                            key={cat}
+                            onClick={() => setAbaAtiva(cat)}
+                            className={`shrink-0 h-9 px-3 rounded-full text-sm transition-all duration-200 touch-manipulation
+                                inline-flex items-center gap-1.5
+                                ${isActive
+                                    ? `${style.bgActive} ${style.text} font-bold shadow-sm`
+                                    : `${style.bg} ${style.text} font-medium opacity-80 hover:opacity-100`
+                                }`}
+                        >
+                            <Icon className="w-3.5 h-3.5" />
+                            {cat}
+                        </button>
+                    )
+                })}
             </div>
 
             {/* Grid de produtos */}

@@ -9,7 +9,7 @@ import CarrinhoLateral from '@/components/pedidos/CarrinhoLateral'
 import ModalPesagem from '@/components/pedidos/ModalPesagem'
 import type { Produto } from '@/lib/types'
 import type { ItemCarrinho, TipoPedido } from '@/lib/types/pedidos'
-import { ShoppingCart as CartIcon, MapPin, Truck, UserX, CreditCard, X } from 'lucide-react'
+import { ShoppingCart as CartIcon, MapPin, Truck, UserX, CreditCard, X, User, Zap, Search, Ban, UtensilsCrossed } from 'lucide-react'
 
 // Gerador local de id pra cart_item_id. crypto.randomUUID() existe em todos os
 // browsers modernos. Fallback de timestamp evita explodir em ambientes velhos.
@@ -42,6 +42,8 @@ interface ClienteSelecionado {
 export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = 'local' }: NovoPedidoClientProps) {
     const [cliente, setCliente] = useState<ClienteSelecionado | null>(null)
     const [vendaAvulsa, setVendaAvulsa] = useState(false)
+    // modoCliente: qual card de identificação está ativo (3 opções mutuamente exclusivas)
+    const [modoCliente, setModoCliente] = useState<'balcao' | 'avulsa' | 'cpf'>('balcao')
     const [tipoPedido, setTipoPedido] = useState<TipoPedido>(tipoInicial)
     const [numeroMesa, setNumeroMesa] = useState<string>('')
     const [carrinho, setCarrinho] = useState<ItemCarrinho[]>([])
@@ -200,15 +202,6 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
         setCartItemEmReweigh(null)
     }, [])
 
-    function handleVendaAvulsa() {
-        setVendaAvulsa(true)
-        setCliente(null)
-    }
-
-    function handleCancelarAvulsa() {
-        setVendaAvulsa(false)
-    }
-
     // ── Submissão ──
     async function handleSubmit() {
         if (carrinho.length === 0) {
@@ -297,43 +290,80 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
                     </div>
                 </div>
 
-                {/* Seção 1: Cliente */}
+                {/* Seção 1: Cliente — 3 cards de modo (Balcão / Venda Avulsa / Buscar CPF) */}
                 <div className="bg-white rounded-2xl border border-blue-100 p-4 shadow-sm">
-                    {vendaAvulsa ? (
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center">
-                                    <UserX className="w-5 h-5 text-gray-400" />
-                                </div>
-                                <div>
-                                    <p className="font-bold text-gray-800">Venda Avulsa</p>
-                                    <p className="text-xs text-gray-400">Cliente não identificado</p>
-                                </div>
+                    <p className="text-sm font-semibold text-gray-700 mb-3">1. Identificar Cliente</p>
+
+                    <div className="flex flex-wrap gap-3 mb-3">
+                        {/* Card 1: Balcão */}
+                        <button
+                            type="button"
+                            onClick={() => { setModoCliente('balcao'); setCliente(null); setVendaAvulsa(false) }}
+                            className={`w-[120px] h-[100px] rounded-xl border-2 p-3 bg-slate-100 flex flex-col items-center justify-center gap-1.5 transition-all duration-200 touch-manipulation active:scale-95 ${
+                                modoCliente === 'balcao'
+                                    ? 'border-primary shadow-md'
+                                    : 'border-transparent opacity-60 hover:opacity-100'
+                            }`}
+                        >
+                            <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center shadow-sm">
+                                <User className="w-5 h-5 text-slate-600" />
                             </div>
-                            <button
-                                onClick={handleCancelarAvulsa}
-                                className="text-xs text-blue-600 font-semibold hover:underline"
-                            >
-                                Identificar cliente
-                            </button>
-                        </div>
-                    ) : (
-                        <div className="space-y-3">
-                            <BuscaClienteCPF
-                                onClienteSelect={setCliente}
-                                clienteSelecionado={cliente}
-                            />
-                            {!cliente && (
-                                <button
-                                    onClick={handleVendaAvulsa}
-                                    className="w-full py-2.5 border-2 border-dashed border-gray-200 text-gray-500
-                                               rounded-xl text-xs font-semibold hover:border-gray-300 hover:text-gray-600
-                                               transition-colors flex items-center justify-center gap-2"
-                                >
-                                    <UserX className="w-3.5 h-3.5" />
-                                    Venda Avulsa (sem cadastro)
-                                </button>
-                            )}
+                            <div className="text-center leading-tight">
+                                <p className="text-[13px] font-bold text-slate-700">Balcão</p>
+                                <p className="text-[10px] text-slate-500">sem identificação</p>
+                            </div>
+                        </button>
+
+                        {/* Card 2: Venda Avulsa */}
+                        <button
+                            type="button"
+                            onClick={() => { setModoCliente('avulsa'); setVendaAvulsa(true); setCliente(null) }}
+                            className={`w-[120px] h-[100px] rounded-xl border-2 p-3 bg-amber-50 flex flex-col items-center justify-center gap-1.5 transition-all duration-200 touch-manipulation active:scale-95 ${
+                                modoCliente === 'avulsa'
+                                    ? 'border-primary shadow-md'
+                                    : 'border-transparent opacity-60 hover:opacity-100'
+                            }`}
+                        >
+                            <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center shadow-sm">
+                                <Zap className="w-5 h-5 text-amber-600" />
+                            </div>
+                            <div className="text-center leading-tight">
+                                <p className="text-[13px] font-bold text-amber-800">Venda Avulsa</p>
+                                <p className="text-[10px] text-amber-700">sem cadastro</p>
+                            </div>
+                        </button>
+
+                        {/* Card 3: Buscar CPF */}
+                        <button
+                            type="button"
+                            onClick={() => { setModoCliente('cpf'); setVendaAvulsa(false) }}
+                            className={`w-[120px] h-[100px] rounded-xl border-2 p-3 bg-white flex flex-col items-center justify-center gap-1.5 transition-all duration-200 touch-manipulation active:scale-95 ${
+                                modoCliente === 'cpf'
+                                    ? 'border-primary shadow-md'
+                                    : 'border-gray-200 opacity-60 hover:opacity-100'
+                            }`}
+                        >
+                            <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center">
+                                <Search className="w-5 h-5 text-primary" />
+                            </div>
+                            <div className="text-center leading-tight">
+                                <p className="text-[13px] font-bold text-primary">Buscar CPF</p>
+                                <p className="text-[10px] text-slate-500">cliente cadastrado</p>
+                            </div>
+                        </button>
+                    </div>
+
+                    {/* Conteúdo abaixo dos cards */}
+                    {modoCliente === 'cpf' && (
+                        <BuscaClienteCPF
+                            onClienteSelect={setCliente}
+                            clienteSelecionado={cliente}
+                        />
+                    )}
+                    {modoCliente === 'avulsa' && (
+                        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200">
+                            <UserX className="w-4 h-4 text-amber-700 shrink-0" />
+                            <p className="text-sm text-amber-800 font-medium">Venda sem cadastro de cliente.</p>
                         </div>
                     )}
                 </div>
@@ -358,12 +388,15 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
                         </div>
 
                         {semComanda ? (
-                            <div className="flex items-center justify-between py-3 px-4 bg-gray-50 rounded-xl border border-gray-200">
-                                <span className="text-sm font-bold text-gray-600">Sem comanda (balcão)</span>
+                            <div className="flex items-center justify-between py-3 px-4 bg-slate-50 rounded-xl border-2 border-dashed border-slate-400">
+                                <div className="flex items-center gap-2">
+                                    <Ban className="w-4 h-4 text-slate-500" />
+                                    <span className="text-sm font-bold text-slate-700">Sem comanda (balcão)</span>
+                                </div>
                                 <button
                                     type="button"
                                     onClick={() => setSemComanda(false)}
-                                    className="text-xs text-blue-600 font-semibold hover:underline"
+                                    className="text-xs text-primary font-semibold hover:underline"
                                 >
                                     Selecionar comanda
                                 </button>
@@ -402,12 +435,14 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
                                 <button
                                     type="button"
                                     onClick={() => { setSemComanda(true); setSelectedComandaId(null) }}
-                                    className="w-full py-2.5 border-2 border-dashed border-gray-200 text-gray-500
-                                               rounded-xl text-xs font-semibold hover:border-gray-300 hover:text-gray-600
-                                               transition-colors flex items-center justify-center gap-2"
+                                    className="w-full min-h-[60px] rounded-xl bg-slate-50 border-2 border-dashed border-slate-300
+                                               text-slate-600 font-bold text-sm
+                                               hover:bg-slate-100 hover:border-slate-400 hover:shadow-sm
+                                               active:scale-[0.98] transition-all duration-200 touch-manipulation
+                                               flex items-center justify-center gap-2"
                                 >
-                                    <X className="w-3.5 h-3.5" />
-                                    Sem comanda (venda de balcão)
+                                    <Ban className="w-4 h-4" />
+                                    Sem comanda (balcão)
                                 </button>
                             </>
                         )}
@@ -416,8 +451,11 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
 
                 {/* Seção 3: Mesa (somente para pedidos locais) */}
                 {tipoPedido === 'local' && (
-                    <div className="bg-white rounded-2xl border border-blue-100 p-4 shadow-sm">
-                        <p className="text-sm font-semibold text-gray-700 mb-3">Número da Mesa</p>
+                    <div className="bg-sky-50 rounded-2xl border border-sky-100 border-l-[3px] border-l-primary p-4 shadow-sm">
+                        <p className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                            <UtensilsCrossed className="w-4 h-4 text-primary" />
+                            Número da Mesa
+                        </p>
                         <input
                             type="number"
                             min={1}
@@ -425,7 +463,7 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
                             placeholder="— (opcional, ex: 5)"
                             value={numeroMesa}
                             onChange={(e) => setNumeroMesa(e.target.value)}
-                            className="w-full h-14 px-4 rounded-xl border border-blue-100 bg-white text-center
+                            className="w-full h-14 px-4 rounded-xl border border-sky-200 bg-white text-center
                                        text-2xl font-bold text-primary focus:outline-none focus:ring-2
                                        focus:ring-primary/40 placeholder:text-gray-300 placeholder:text-base
                                        placeholder:font-normal"
