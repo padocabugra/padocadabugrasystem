@@ -7,7 +7,7 @@ import { toast } from 'sonner'
 import {
     Search, Receipt, Banknote, CreditCard, Smartphone, ArrowDownCircle,
     ArrowUpCircle, ChevronRight, RefreshCw, CheckCircle2, X,
-    DollarSign, Clock, AlertTriangle, Hash, User, Star, Printer
+    DollarSign, Clock, AlertTriangle, Hash, User, Star, Printer, Lock
 } from 'lucide-react'
 import { dataHoraLocalVisual, getAgoraUTC } from '@/lib/timezone'
 import { unformatCPF, isValidCPF } from '@/lib/formatters'
@@ -60,11 +60,6 @@ interface NfceInfo {
     chaveAcesso?: string
     danfeUrl?: string
     erro?: string
-    debug?: {
-        statusHttp: number
-        payloadEnviado: unknown
-        respostaCrua: unknown
-    }
 }
 
 interface DadosRecibo {
@@ -175,6 +170,28 @@ export default function CaixaClient({
 
     // Modal PIX
     const [modalPix, setModalPix] = useState(false)
+
+    // Modal Fechamento de Caixa
+    interface ResumoCaixa {
+        aberto: boolean
+        abertura_valor: number
+        saldo_atual: number
+        total_vendas: number
+        qtd_vendas: number
+        total_dinheiro: number
+        total_pix: number
+        total_debito: number
+        total_credito: number
+        total_sangrias: number
+        total_reforcos: number
+        saldo_esperado_dinheiro: number
+    }
+    const [modalFechamento, setModalFechamento] = useState(false)
+    const [resumoFechamento, setResumoFechamento] = useState<ResumoCaixa | null>(null)
+    const [carregandoResumo, setCarregandoResumo] = useState(false)
+    const [valorContado, setValorContado] = useState('')
+    const [obsFechamento, setObsFechamento] = useState('')
+    const [processandoFechamento, setProcessandoFechamento] = useState(false)
 
     // ── Carregar pedidos prontos ──────────────────────────────────────────────
 
@@ -545,6 +562,110 @@ export default function CaixaClient({
         }
     }
 
+    // ── Fechamento de Caixa ───────────────────────────────────────────────
+
+    async function abrirModalFechamento() {
+        if (!aberturaHoje) {
+            toast.error('Não há caixa aberto para fechar.')
+            return
+        }
+        setCarregandoResumo(true)
+        setModalFechamento(true)
+        setValorContado('')
+        setObsFechamento('')
+        try {
+            const { data, error } = await supabase.rpc('resumo_caixa_dia', {
+                p_usuario_id: usuarioId,
+            })
+            if (error) throw error
+            if (!data || data.aberto === false) {
+                toast.error('Resumo indisponível — caixa não aparece aberto no servidor.')
+                setModalFechamento(false)
+                return
+            }
+            setResumoFechamento(data as ResumoCaixa)
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'Erro desconhecido'
+            toast.error('Erro ao carregar resumo: ' + msg)
+            setModalFechamento(false)
+        } finally {
+            setCarregandoResumo(false)
+        }
+    }
+
+    function fecharModalFechamento() {
+        setModalFechamento(false)
+        setResumoFechamento(null)
+        setValorContado('')
+        setObsFechamento('')
+    }
+
+    async function handleFecharCaixa() {
+        const valor = parseFloat(valorContado.replace(',', '.'))
+        if (isNaN(valor) || valor < 0) {
+            toast.error('Informe o valor contado em dinheiro.')
+            return
+        }
+        if (!confirm('Confirmar fechamento do caixa? Para registrar novas vendas será necessário abrir um novo caixa.')) return
+
+        setProcessandoFechamento(true)
+        try {
+            const { data, error } = await supabase.rpc('fechar_caixa', {
+                p_usuario_id: usuarioId,
+                p_valor_contado: valor,
+                p_observacao: obsFechamento || null,
+            })
+            if (error) throw error
+
+            const diferenca = (data?.diferenca ?? 0) as number
+            const esperado = (data?.saldo_esperado_dinheiro ?? 0) as number
+
+            registrarAuditLog({
+                acao: 'caixa.fechamento',
+                entidade: 'caixa',
+                entidade_id: data?.fechamento_id,
+                detalhes: {
+                    valor_contado: valor,
+                    saldo_esperado: esperado,
+                    diferenca,
+                    observacao: obsFechamento,
+                    resumo: data?.resumo,
+                },
+                usuario_id: usuarioId,
+                usuario_nome: usuarioNome,
+            })
+
+            const msgDif = diferenca === 0
+                ? 'sem diferença'
+                : diferenca > 0
+                    ? `sobra de ${formatCurrency(diferenca)}`
+                    : `falta de ${formatCurrency(Math.abs(diferenca))}`
+            toast.success(`Caixa fechado (${msgDif}).`)
+
+            // Reseta estado local — força modal de abertura na próxima ação
+            fecharModalFechamento()
+            setAberturaHoje(null)
+            setSaldoAtual(0)
+            setModalAbertura(true)
+            setPedidoSelecionado(null)
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'Erro desconhecido'
+            if (msg.includes('JA_FECHADO')) {
+                toast.error('Este turno já foi fechado. Abra um novo caixa para continuar.')
+                setAberturaHoje(null)
+                setModalAbertura(true)
+                fecharModalFechamento()
+            } else if (msg.includes('SEM_ABERTURA')) {
+                toast.error('Não há caixa aberto para fechar.')
+                fecharModalFechamento()
+            } else {
+                toast.error('Erro ao fechar caixa: ' + msg)
+            }
+        } finally {
+            setProcessandoFechamento(false)
+        }
+    }
+
     // ── Fechar Cupom Digital e resetar PDV ─────────────────────────────────
 
     function handleNovoAtendimento() {
@@ -729,19 +850,6 @@ export default function CaixaClient({
                                         <p className="text-[11px] text-amber-700/70">
                                             A venda foi registrada normalmente. Apenas a NFC-e não foi emitida.
                                         </p>
-                                        {reciboAtual.nfce.debug && (
-                                            <details className="text-[10px] text-amber-900/80 mt-2">
-                                                <summary className="cursor-pointer font-semibold">Debug homologação — clique para expandir</summary>
-                                                <p className="mt-1 font-semibold">Payload enviado:</p>
-                                                <pre className="whitespace-pre-wrap break-all bg-amber-100/60 p-1 rounded max-h-40 overflow-auto">
-{JSON.stringify(reciboAtual.nfce.debug.payloadEnviado, null, 2)}
-                                                </pre>
-                                                <p className="mt-1 font-semibold">Resposta crua (HTTP {reciboAtual.nfce.debug.statusHttp}):</p>
-                                                <pre className="whitespace-pre-wrap break-all bg-amber-100/60 p-1 rounded max-h-40 overflow-auto">
-{JSON.stringify(reciboAtual.nfce.debug.respostaCrua, null, 2)}
-                                                </pre>
-                                            </details>
-                                        )}
                                     </div>
                                 )
                             )}
@@ -864,6 +972,156 @@ export default function CaixaClient({
                 </div>
             )}
 
+            {/* ── Modal Fechamento de Caixa ── */}
+            {modalFechamento && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+                        <div className="px-6 pt-5 pb-4 bg-gradient-to-br from-gray-800 to-gray-900 text-white flex items-center justify-between sticky top-0">
+                            <div className="flex items-center gap-2">
+                                <Lock className="w-5 h-5" />
+                                <h2 className="text-base font-bold">Fechar Caixa</h2>
+                            </div>
+                            <button
+                                onClick={fecharModalFechamento}
+                                disabled={processandoFechamento}
+                                className="p-1 text-white/70 hover:text-white rounded"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        {carregandoResumo || !resumoFechamento ? (
+                            <div className="flex flex-col items-center justify-center gap-2 p-10 text-gray-400">
+                                <RefreshCw className="w-6 h-6 animate-spin" />
+                                <p className="text-sm">Calculando resumo do turno…</p>
+                            </div>
+                        ) : (
+                            <div className="p-5 space-y-4">
+                                {/* Resumo Vendas */}
+                                <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 space-y-1.5">
+                                    <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Resumo do Turno</p>
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-gray-600">Fundo de troco</span>
+                                        <span className="font-semibold text-gray-800">{formatCurrency(resumoFechamento.abertura_valor)}</span>
+                                    </div>
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-gray-600">Vendas ({resumoFechamento.qtd_vendas})</span>
+                                        <span className="font-semibold text-gray-800">{formatCurrency(resumoFechamento.total_vendas)}</span>
+                                    </div>
+                                    <div className="border-t border-dashed border-gray-200 my-1.5" />
+                                    <div className="flex justify-between text-xs">
+                                        <span className="text-gray-500 flex items-center gap-1"><Banknote className="w-3 h-3" /> Dinheiro</span>
+                                        <span className="font-medium text-gray-700">{formatCurrency(resumoFechamento.total_dinheiro)}</span>
+                                    </div>
+                                    <div className="flex justify-between text-xs">
+                                        <span className="text-gray-500 flex items-center gap-1"><Smartphone className="w-3 h-3" /> PIX</span>
+                                        <span className="font-medium text-gray-700">{formatCurrency(resumoFechamento.total_pix)}</span>
+                                    </div>
+                                    <div className="flex justify-between text-xs">
+                                        <span className="text-gray-500 flex items-center gap-1"><CreditCard className="w-3 h-3" /> Débito</span>
+                                        <span className="font-medium text-gray-700">{formatCurrency(resumoFechamento.total_debito)}</span>
+                                    </div>
+                                    <div className="flex justify-between text-xs">
+                                        <span className="text-gray-500 flex items-center gap-1"><CreditCard className="w-3 h-3" /> Crédito</span>
+                                        <span className="font-medium text-gray-700">{formatCurrency(resumoFechamento.total_credito)}</span>
+                                    </div>
+                                    <div className="border-t border-dashed border-gray-200 my-1.5" />
+                                    <div className="flex justify-between text-xs">
+                                        <span className="text-red-600 flex items-center gap-1"><ArrowDownCircle className="w-3 h-3" /> Sangrias</span>
+                                        <span className="font-medium text-red-600">- {formatCurrency(resumoFechamento.total_sangrias)}</span>
+                                    </div>
+                                    <div className="flex justify-between text-xs">
+                                        <span className="text-emerald-600 flex items-center gap-1"><ArrowUpCircle className="w-3 h-3" /> Reforços</span>
+                                        <span className="font-medium text-emerald-600">+ {formatCurrency(resumoFechamento.total_reforcos)}</span>
+                                    </div>
+                                </div>
+
+                                {/* Saldo esperado em dinheiro */}
+                                <div className="bg-blue-50 border-2 border-blue-200 rounded-xl px-4 py-3 flex items-center justify-between">
+                                    <div>
+                                        <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wide">Esperado em dinheiro</p>
+                                        <p className="text-[10px] text-blue-500">Fundo + vendas dinheiro − sangrias + reforços</p>
+                                    </div>
+                                    <p className="text-xl font-black text-blue-700">{formatCurrency(resumoFechamento.saldo_esperado_dinheiro)}</p>
+                                </div>
+
+                                {/* Valor contado */}
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">
+                                        Valor contado em dinheiro
+                                    </label>
+                                    <div className="relative">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm font-medium">R$</span>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            step="0.01"
+                                            placeholder="0,00"
+                                            value={valorContado}
+                                            onChange={(e) => setValorContado(e.target.value)}
+                                            className="w-full pl-10 pr-3 py-2.5 border-2 border-gray-200 focus:border-gray-700 rounded-xl text-base font-bold outline-none transition-colors"
+                                            autoFocus
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Diferença em tempo real */}
+                                {valorContado !== '' && !isNaN(parseFloat(valorContado.replace(',', '.'))) && (() => {
+                                    const contado = parseFloat(valorContado.replace(',', '.'))
+                                    const dif = contado - resumoFechamento.saldo_esperado_dinheiro
+                                    if (dif === 0) {
+                                        return (
+                                            <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 px-4 py-2.5 rounded-xl">
+                                                <span className="text-sm font-bold text-emerald-700 flex items-center gap-2"><CheckCircle2 className="w-4 h-4" /> Confere</span>
+                                                <span className="text-sm font-bold text-emerald-700">R$ 0,00</span>
+                                            </div>
+                                        )
+                                    }
+                                    const sobra = dif > 0
+                                    return (
+                                        <div className={`flex items-center justify-between px-4 py-2.5 rounded-xl border ${sobra ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+                                            <span className="text-sm font-bold flex items-center gap-2">
+                                                <AlertTriangle className="w-4 h-4" /> {sobra ? 'Sobra' : 'Falta'}
+                                            </span>
+                                            <span className="text-sm font-bold">{formatCurrency(Math.abs(dif))}</span>
+                                        </div>
+                                    )
+                                })()}
+
+                                {/* Observação */}
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wide">
+                                        Observação (opcional)
+                                    </label>
+                                    <input
+                                        type="text"
+                                        placeholder="Ex: Conferido com Bugra, troco repassado…"
+                                        value={obsFechamento}
+                                        onChange={(e) => setObsFechamento(e.target.value)}
+                                        className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-gray-200 outline-none"
+                                    />
+                                </div>
+
+                                <button
+                                    onClick={handleFecharCaixa}
+                                    disabled={processandoFechamento || valorContado === ''}
+                                    className="w-full py-3 bg-gray-800 hover:bg-gray-900 text-white rounded-xl font-extrabold text-sm transition-all active:scale-[0.98] disabled:opacity-60 flex items-center justify-center gap-2"
+                                >
+                                    {processandoFechamento ? (
+                                        <><RefreshCw className="w-4 h-4 animate-spin" /> Fechando…</>
+                                    ) : (
+                                        <><Lock className="w-4 h-4" /> Confirmar Fechamento</>
+                                    )}
+                                </button>
+                                <p className="text-[10px] text-gray-400 text-center">
+                                    Após fechar, será preciso abrir um novo caixa para registrar vendas.
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
             {/* ── Modal PIX ── */}
             {modalPix && pedidoSelecionado && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -947,6 +1205,14 @@ export default function CaixaClient({
                             >
                                 <ArrowUpCircle className="w-3.5 h-3.5" />
                                 Reforço
+                            </button>
+                            <button
+                                onClick={abrirModalFechamento}
+                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gray-800 hover:bg-gray-900 border border-gray-800 rounded-lg transition-colors"
+                                title="Fechar caixa manualmente (conferência)"
+                            >
+                                <Lock className="w-3.5 h-3.5" />
+                                Fechar Caixa
                             </button>
                             <button
                                 onClick={carregarPedidosProntos}

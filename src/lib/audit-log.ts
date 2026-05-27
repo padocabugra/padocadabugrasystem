@@ -9,6 +9,7 @@ export type AuditAction =
     | 'estoque.entrada'
     | 'estoque.saida'
     | 'caixa.abertura'
+    | 'caixa.fechamento'
     | 'caixa.sangria'
     | 'caixa.reforco'
     | 'caixa.venda'

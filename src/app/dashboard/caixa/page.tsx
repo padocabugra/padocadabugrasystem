@@ -26,8 +26,8 @@ export default async function CaixaPage() {
     // Início do dia corrente timezone MS
     const inicioDia = getInicioDoDia()
 
-    // Verifica se há abertura de caixa para o usuário no dia atual
-    const { data: aberturaHoje } = await supabase
+    // Abertura mais recente do dia
+    const { data: aberturaCandidata } = await supabase
         .from('caixa')
         .select('id, valor, saldo, created_at')
         .eq('usuario_id', usuario.id)
@@ -37,15 +37,32 @@ export default async function CaixaPage() {
         .limit(1)
         .maybeSingle()
 
-    // Saldo atual do caixa (última movimentação do dia)
-    const { data: ultimaMovimentacao } = await supabase
-        .from('caixa')
-        .select('saldo')
-        .eq('usuario_id', usuario.id)
-        .gte('created_at', inicioDia)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
+    // Se houver fechamento posterior à abertura, considera o caixa fechado
+    // (o operador precisa reabrir manualmente). Caso contrário, abertura ativa.
+    let aberturaHoje = aberturaCandidata
+    if (aberturaCandidata) {
+        const { data: fechamentoPosterior } = await supabase
+            .from('caixa')
+            .select('id')
+            .eq('usuario_id', usuario.id)
+            .eq('tipo', 'fechamento')
+            .gt('created_at', aberturaCandidata.created_at)
+            .limit(1)
+            .maybeSingle()
+        if (fechamentoPosterior) aberturaHoje = null
+    }
+
+    // Saldo atual do turno ativo (última movimentação após a abertura ativa)
+    const { data: ultimaMovimentacao } = aberturaHoje
+        ? await supabase
+            .from('caixa')
+            .select('saldo')
+            .eq('usuario_id', usuario.id)
+            .gte('created_at', aberturaHoje.created_at)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+        : { data: null }
 
     // Busca pedidos com status 'pronto' para o PDV consumir
     const { data: pedidosProntos } = await supabase
