@@ -53,6 +53,10 @@ function formatarData(iso: string): string {
 
 export default function AuditLogPage() {
     const [logs, setLogs] = useState<AuditEntry[]>([])
+    // Mapa usuario_id → nome, populado por query separada (audit_log não tem FK
+    // direta pra public.usuarios — ambos referenciam auth.users — então o embed
+    // do PostgREST falha; resolvemos em duas queries).
+    const [usuarioMap, setUsuarioMap] = useState<Map<string, string>>(new Map())
     const [loading, setLoading] = useState(true)
     const [busca, setBusca] = useState('')
     const [filtro, setFiltro] = useState<FiltroEntidade>('todos')
@@ -68,10 +72,58 @@ export default function AuditLogPage() {
                 .order('created_at', { ascending: false })
                 .limit(500)
 
-            if (error) throw error
-            setLogs((data ?? []) as AuditEntry[])
-        } catch {
-            toast.error('Erro ao carregar logs de auditoria')
+            if (error) {
+                console.error('[AUDIT_LOG] fetch error:', JSON.stringify(error, Object.getOwnPropertyNames(error)))
+                // Caso típico: tabela não criada no Supabase (migration 011 não aplicada).
+                // PGRST205 = "Could not find the table ... in the schema cache".
+                const msg = (error as any)?.code === 'PGRST205'
+                    ? 'Tabela audit_log não existe no banco. Aplique migrations/011_create_audit_log.sql no Supabase.'
+                    : (error.message || 'Falha ao carregar logs')
+                toast.error(msg, {
+                    description: error.hint || error.details || undefined,
+                    duration: 8000,
+                })
+                setLogs([])
+                return
+            }
+
+            const lista = (data ?? []) as AuditEntry[]
+            setLogs(lista)
+
+            // Resolve nomes que não foram persistidos no momento da inserção.
+            // Coleta uuids únicos cujo usuario_nome está vazio.
+            const idsParaResolver = Array.from(new Set(
+                lista
+                    .filter((l) => !l.usuario_nome && l.usuario_id)
+                    .map((l) => l.usuario_id as string)
+            ))
+
+            if (idsParaResolver.length > 0) {
+                const { data: usuariosData, error: usuariosErr } = await supabase
+                    .from('usuarios')
+                    .select('id, nome')
+                    .in('id', idsParaResolver)
+
+                if (usuariosErr) {
+                    console.error('[AUDIT_LOG] enrich error:', {
+                        message: usuariosErr.message,
+                        code: usuariosErr.code,
+                        details: usuariosErr.details,
+                        hint: usuariosErr.hint,
+                    })
+                } else {
+                    const map = new Map<string, string>()
+                    for (const u of (usuariosData ?? []) as Array<{ id: string; nome: string }>) {
+                        map.set(u.id, u.nome)
+                    }
+                    setUsuarioMap(map)
+                }
+            } else {
+                setUsuarioMap(new Map())
+            }
+        } catch (err) {
+            console.error('[AUDIT_LOG] exception:', err)
+            toast.error('Falha inesperada ao carregar logs')
         } finally {
             setLoading(false)
         }
@@ -195,7 +247,7 @@ export default function AuditLogPage() {
                                         </td>
                                         <td className="px-4 py-3">
                                             <p className="font-semibold text-gray-700 text-xs">
-                                                {log.usuario_nome ?? '—'}
+                                                {log.usuario_nome ?? (log.usuario_id ? usuarioMap.get(log.usuario_id) : null) ?? '—'}
                                             </p>
                                         </td>
                                         <td className="px-4 py-3">
