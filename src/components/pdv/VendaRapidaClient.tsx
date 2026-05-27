@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import {
     Search, Plus, Minus, Trash2, ShoppingCart, Package,
     Banknote, Smartphone, CreditCard, X, Zap, Lock, CheckCircle2,
-    Receipt, AlertTriangle, RefreshCw, Printer,
+    Receipt, AlertTriangle, RefreshCw, Printer, Scale,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency, unformatCPF, isValidCPF } from '@/lib/formatters'
@@ -17,14 +17,31 @@ import DanfeNFCePrint from '@/components/caixa/DanfeNFCePrint'
 import { dataHoraLocalVisual, getAgoraUTC } from '@/lib/timezone'
 import { useThermalPrinter } from '@/components/shared/ThermalPrinterContext'
 import { useCallback } from 'react'
+import ModalPesagem from '@/components/pedidos/ModalPesagem'
+
+// Gerador local de id pra cart_item_id (linhas kg duplicadas precisam de id unico).
+function novoCartItemId(): string {
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+        return crypto.randomUUID()
+    }
+    return `cart-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
+const isKg = (p: { unidade_medida?: string | null }) =>
+    (p.unidade_medida ?? '').toLowerCase() === 'kg'
 
 type FormaPagamento = 'dinheiro' | 'pix' | 'debito' | 'credito'
 
+// Itens "un" fundem por produto_id (clicar de novo incrementa quantidade).
+// Itens "kg" sao linhas independentes — cada pesagem gera um cart_item_id
+// proprio com peso_gramas associado.
 interface CartItem {
-    id: string
+    cart_item_id: string         // uuid local, unico por linha do carrinho
+    produto_id: string           // id real do produto (FK)
     nome: string
-    preco: number
-    quantidade: number
+    preco: number                // preco unitario OU preco por kg
+    quantidade: number           // unidades (inteiro) OU peso em kg (fracionario)
+    peso_gramas?: number         // apenas em itens kg, pra display/re-pesagem
     // Dados fiscais vindos do produto
     codigo?: string | null
     unidade_medida?: string | null
@@ -111,6 +128,12 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
     const [valorRecebido, setValorRecebido] = useState('')
     const [processando, setProcessando] = useState(false)
 
+    // ── Pesagem ──
+    // produtoParaPesar: produto kg aguardando peso (clique no card kg ou re-pesagem)
+    // cartItemEmReweigh: linha kg sendo re-pesada (null = nova pesagem)
+    const [produtoParaPesar, setProdutoParaPesar] = useState<Produto | null>(null)
+    const [cartItemEmReweigh, setCartItemEmReweigh] = useState<string | null>(null)
+
     const [recibo, setRecibo] = useState<ReciboFinal | null>(null)
 
     // CPF na nota (opcional). Formatado: 000.000.000-00
@@ -135,15 +158,25 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
 
     // ── Carrinho ──────────────────────────────────────────────────────
     function adicionar(produto: Produto) {
+        // Produto vendido por kg → abre modal de pesagem
+        if (isKg(produto)) {
+            setProdutoParaPesar(produto)
+            setCartItemEmReweigh(null)
+            return
+        }
+        // Produto unitario → funde por produto_id
         setCarrinho((prev) => {
-            const existente = prev.find((i) => i.id === produto.id)
+            const existente = prev.find((i) => i.produto_id === produto.id && !isKg(i))
             if (existente) {
                 return prev.map((i) =>
-                    i.id === produto.id ? { ...i, quantidade: i.quantidade + 1 } : i
+                    i.cart_item_id === existente.cart_item_id
+                        ? { ...i, quantidade: i.quantidade + 1 }
+                        : i
                 )
             }
             return [...prev, {
-                id: produto.id,
+                cart_item_id: novoCartItemId(),
+                produto_id: produto.id,
                 nome: produto.nome,
                 preco: Number(produto.preco),
                 quantidade: 1,
@@ -156,15 +189,68 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
         })
     }
 
-    function alterarQtd(id: string, delta: number) {
+    function alterarQtd(cart_item_id: string, delta: number) {
         setCarrinho((prev) => prev
-            .map((i) => i.id === id ? { ...i, quantidade: i.quantidade + delta } : i)
+            .map((i) => {
+                if (i.cart_item_id !== cart_item_id) return i
+                if (isKg(i)) return i   // itens kg nao incrementam — usar re-pesagem
+                return { ...i, quantidade: i.quantidade + delta }
+            })
             .filter((i) => i.quantidade > 0)
         )
     }
 
-    function removerItem(id: string) {
-        setCarrinho((prev) => prev.filter((i) => i.id !== id))
+    function removerItem(cart_item_id: string) {
+        setCarrinho((prev) => prev.filter((i) => i.cart_item_id !== cart_item_id))
+    }
+
+    function handleRePesar(cart_item_id: string) {
+        const item = carrinho.find((i) => i.cart_item_id === cart_item_id)
+        if (!item || !isKg(item)) return
+        const produto = produtos.find((p) => p.id === item.produto_id)
+        if (!produto) return
+        setProdutoParaPesar(produto)
+        setCartItemEmReweigh(cart_item_id)
+    }
+
+    function handleConfirmarPesagem(produtoConfirmado: Produto, pesoGramas: number) {
+        if (pesoGramas <= 0) {
+            setProdutoParaPesar(null)
+            setCartItemEmReweigh(null)
+            return
+        }
+        const pesoKg = pesoGramas / 1000
+        const precoPorKg = Number(produtoConfirmado.preco)
+
+        setCarrinho((prev) => {
+            if (cartItemEmReweigh) {
+                return prev.map((i) =>
+                    i.cart_item_id === cartItemEmReweigh
+                        ? { ...i, quantidade: pesoKg, peso_gramas: pesoGramas }
+                        : i
+                )
+            }
+            return [...prev, {
+                cart_item_id: novoCartItemId(),
+                produto_id: produtoConfirmado.id,
+                nome: produtoConfirmado.nome,
+                preco: precoPorKg,
+                quantidade: pesoKg,
+                peso_gramas: pesoGramas,
+                codigo: produtoConfirmado.codigo ?? null,
+                unidade_medida: 'kg',
+                ncm: produtoConfirmado.ncm ?? null,
+                cfop: produtoConfirmado.cfop ?? null,
+                csosn: produtoConfirmado.csosn ?? null,
+            }]
+        })
+        setProdutoParaPesar(null)
+        setCartItemEmReweigh(null)
+    }
+
+    function handleCancelarPesagem() {
+        setProdutoParaPesar(null)
+        setCartItemEmReweigh(null)
     }
 
     const total = carrinho.reduce((acc, i) => acc + i.preco * i.quantidade, 0)
@@ -234,14 +320,14 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                     formaPagamento: forma,
                     cpfCliente: cpfClienteEnvio,
                     itens: itens.map((i) => ({
-                        codigo: (i.codigo && i.codigo.trim()) || i.id,
+                        codigo: (i.codigo && i.codigo.trim()) || i.produto_id,
                         nome: i.nome,
                         ncm: i.ncm || undefined,
                         cfop: i.cfop ? Number(i.cfop) : undefined,
                         csosn: i.csosn || undefined,
                         quantidade: i.quantidade,
                         valorUnitario: i.preco,
-                        unidade: i.unidade_medida || 'UN',
+                        unidade: (i.unidade_medida || 'UN').toUpperCase(),
                     })),
                 }),
             })
@@ -294,7 +380,7 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
             p_valor_pago: valorPago,
             p_cliente_id: null,
             p_itens: carrinho.map((i) => ({
-                produto_id: i.id,
+                produto_id: i.produto_id,
                 quantidade: i.quantidade,
                 preco_unitario: i.preco,
             })),
@@ -367,14 +453,12 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
 
         <div className="flex flex-col gap-3 h-[calc(100vh-7rem)]">
             {/* Header */}
-            <div className="flex items-center justify-between shrink-0">
-                <div>
-                    <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                        <Zap className="w-5 h-5 text-emerald-500 fill-emerald-500" />
-                        Venda Rápida
-                    </h1>
-                    <p className="text-sm text-gray-500">Balcão — sem cadastro, finaliza direto no caixa.</p>
-                </div>
+            <div className="shrink-0">
+                <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                    <Zap className="w-5 h-5 text-emerald-500 fill-emerald-500" />
+                    Venda Rápida
+                </h1>
+                <p className="text-sm text-gray-500">Balcão — sem cadastro, finaliza direto no caixa.</p>
             </div>
 
             <div className="flex flex-col md:flex-row gap-3 flex-1 min-h-0">
@@ -418,19 +502,34 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                             </div>
                         ) : (
                             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                                {produtosFiltrados.map((produto) => (
-                                    <button
-                                        key={produto.id}
-                                        onClick={() => adicionar(produto)}
-                                        className="text-left bg-white border-2 border-gray-100 rounded-xl p-3 hover:border-blue-300 hover:shadow-md active:scale-95 transition-all min-h-[88px] flex flex-col justify-between touch-manipulation"
-                                    >
-                                        <div>
-                                            <span className="text-[10px] uppercase font-bold text-blue-400 tracking-wider">{produto.categoria}</span>
-                                            <h3 className="font-semibold text-gray-800 text-sm leading-snug line-clamp-2">{produto.nome}</h3>
-                                        </div>
-                                        <span className="font-extrabold text-primary text-base mt-1">{formatCurrency(Number(produto.preco))}</span>
-                                    </button>
-                                ))}
+                                {produtosFiltrados.map((produto) => {
+                                    const pesado = isKg(produto)
+                                    return (
+                                        <button
+                                            key={produto.id}
+                                            onClick={() => adicionar(produto)}
+                                            className={`text-left bg-white border-2 rounded-xl p-3 hover:shadow-md active:scale-95 transition-all min-h-[88px] flex flex-col justify-between touch-manipulation relative ${pesado
+                                                ? 'border-emerald-200 hover:border-emerald-400'
+                                                : 'border-gray-100 hover:border-blue-300'
+                                                }`}
+                                        >
+                                            {pesado && (
+                                                <span className="absolute top-1.5 right-1.5 bg-emerald-600 text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-md uppercase tracking-wider flex items-center gap-0.5">
+                                                    <Scale className="w-2.5 h-2.5" />
+                                                    kg
+                                                </span>
+                                            )}
+                                            <div>
+                                                <span className={`text-[10px] uppercase font-bold tracking-wider ${pesado ? 'text-emerald-500' : 'text-blue-400'}`}>{produto.categoria}</span>
+                                                <h3 className="font-semibold text-gray-800 text-sm leading-snug line-clamp-2">{produto.nome}</h3>
+                                            </div>
+                                            <span className={`font-extrabold text-base mt-1 ${pesado ? 'text-emerald-700' : 'text-primary'}`}>
+                                                {formatCurrency(Number(produto.preco))}
+                                                {pesado && <span className="text-[10px] font-medium opacity-70 ml-0.5">/kg</span>}
+                                            </span>
+                                        </button>
+                                    )
+                                })}
                             </div>
                         )}
                     </div>
@@ -465,35 +564,72 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                                 <p className="text-sm">Toque em um produto para adicioná-lo</p>
                             </div>
                         ) : (
-                            carrinho.map((item) => (
-                                <div key={item.id} className="flex items-center gap-2 px-3 py-2.5">
-                                    <div className="flex-1 min-w-0">
-                                        <p className="text-sm font-semibold text-gray-800 truncate">{item.nome}</p>
-                                        <p className="text-xs text-gray-500">{formatCurrency(item.preco)} × {item.quantidade}</p>
+                            carrinho.map((item) => {
+                                const itemEhKg = isKg(item)
+                                const pesoG = item.peso_gramas ?? Math.round(item.quantidade * 1000)
+                                const pesoLabel = pesoG >= 1000
+                                    ? `${(pesoG / 1000).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg`
+                                    : `${pesoG} g`
+                                return (
+                                    <div key={item.cart_item_id} className="flex items-center gap-2 px-3 py-2.5">
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-sm font-semibold text-gray-800 truncate flex items-center gap-1.5">
+                                                {itemEhKg && <Scale className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
+                                                {item.nome}
+                                            </p>
+                                            {itemEhKg ? (
+                                                <p className="text-xs text-emerald-700/80 font-medium">
+                                                    {pesoLabel} @ {formatCurrency(item.preco)}/kg
+                                                </p>
+                                            ) : (
+                                                <p className="text-xs text-gray-500">{formatCurrency(item.preco)} × {item.quantidade}</p>
+                                            )}
+                                        </div>
+                                        <p className={`text-sm font-bold shrink-0 ${itemEhKg ? 'text-emerald-700' : 'text-primary'}`}>
+                                            {formatCurrency(item.preco * item.quantidade)}
+                                        </p>
+                                        <div className="flex items-center gap-1 shrink-0">
+                                            {itemEhKg ? (
+                                                <>
+                                                    <button
+                                                        onClick={() => removerItem(item.cart_item_id)}
+                                                        className="w-9 h-9 rounded-xl bg-red-50 border border-red-100 flex items-center justify-center active:scale-90 transition-transform touch-manipulation"
+                                                        aria-label="Remover item"
+                                                    >
+                                                        <Trash2 className="w-4 h-4 text-red-500" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleRePesar(item.cart_item_id)}
+                                                        className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center active:scale-90 transition-transform touch-manipulation"
+                                                        aria-label="Re-pesar item"
+                                                    >
+                                                        <Scale className="w-4 h-4 text-emerald-600" />
+                                                    </button>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <button
+                                                        onClick={() => alterarQtd(item.cart_item_id, -1)}
+                                                        className="w-9 h-9 rounded-xl bg-red-50 border border-red-100 flex items-center justify-center active:scale-90 transition-transform touch-manipulation"
+                                                    >
+                                                        {item.quantidade === 1
+                                                            ? <Trash2 className="w-4 h-4 text-red-500" />
+                                                            : <Minus className="w-4 h-4 text-red-500" />
+                                                        }
+                                                    </button>
+                                                    <span className="w-7 text-center text-sm font-bold text-gray-700">{item.quantidade}</span>
+                                                    <button
+                                                        onClick={() => alterarQtd(item.cart_item_id, +1)}
+                                                        className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center active:scale-90 transition-transform touch-manipulation"
+                                                    >
+                                                        <Plus className="w-4 h-4 text-primary" />
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
                                     </div>
-                                    <p className="text-sm font-bold text-primary shrink-0">
-                                        {formatCurrency(item.preco * item.quantidade)}
-                                    </p>
-                                    <div className="flex items-center gap-1 shrink-0">
-                                        <button
-                                            onClick={() => alterarQtd(item.id, -1)}
-                                            className="w-9 h-9 rounded-xl bg-red-50 border border-red-100 flex items-center justify-center active:scale-90 transition-transform touch-manipulation"
-                                        >
-                                            {item.quantidade === 1
-                                                ? <Trash2 className="w-4 h-4 text-red-500" />
-                                                : <Minus className="w-4 h-4 text-red-500" />
-                                            }
-                                        </button>
-                                        <span className="w-7 text-center text-sm font-bold text-gray-700">{item.quantidade}</span>
-                                        <button
-                                            onClick={() => alterarQtd(item.id, +1)}
-                                            className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center active:scale-90 transition-transform touch-manipulation"
-                                        >
-                                            <Plus className="w-4 h-4 text-primary" />
-                                        </button>
-                                    </div>
-                                </div>
-                            ))
+                                )
+                            })
                         )}
                     </div>
 
@@ -758,6 +894,20 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* ── Modal de Pesagem ── */}
+            {produtoParaPesar && (
+                <ModalPesagem
+                    produto={produtoParaPesar}
+                    onConfirmar={handleConfirmarPesagem}
+                    onCancelar={handleCancelarPesagem}
+                    pesoInicialGramas={
+                        cartItemEmReweigh
+                            ? carrinho.find((i) => i.cart_item_id === cartItemEmReweigh)?.peso_gramas
+                            : undefined
+                    }
+                />
             )}
         </div>
         </>

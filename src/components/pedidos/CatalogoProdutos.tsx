@@ -1,15 +1,17 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus } from 'lucide-react'
+import { Plus, Scale } from 'lucide-react'
 import type { Produto } from '@/lib/types'
 
 interface CatalogoProdutosProps {
     produtos: Produto[]
     onAddProduto: (produto: Produto) => void
+    /** Quando true, esconde o título "3. Catálogo de Produtos" (caller já renderiza o cabeçalho). */
+    hideHeader?: boolean
 }
 
-export default function CatalogoProdutos({ produtos, onAddProduto }: CatalogoProdutosProps) {
+export default function CatalogoProdutos({ produtos, onAddProduto, hideHeader }: CatalogoProdutosProps) {
     // Extrai categorias únicas, começa com 'Todos'
     const categorias = ['Todos', ...Array.from(new Set(
         produtos.map((p) => p.categoria ?? 'Sem Categoria')
@@ -26,7 +28,9 @@ export default function CatalogoProdutos({ produtos, onAddProduto }: CatalogoPro
 
     return (
         <div className="flex flex-col gap-4 h-full">
-            <p className="text-sm font-semibold text-gray-700">3. Catálogo de Produtos</p>
+            {!hideHeader && (
+                <p className="text-sm font-semibold text-gray-700">3. Catálogo de Produtos</p>
+            )}
 
             {/* Busca rápida */}
             <input
@@ -63,36 +67,57 @@ export default function CatalogoProdutos({ produtos, onAddProduto }: CatalogoPro
                 </div>
             ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-3 overflow-y-auto pr-1">
-                    {produtosFiltrados.map((produto) => (
-                        <button
-                            key={produto.id}
-                            onClick={() => onAddProduto(produto)}
-                            className="group flex flex-col items-start gap-1.5 p-3 rounded-2xl bg-white border
-                                       border-blue-100 text-left active:scale-95 transition-all touch-manipulation
-                                       hover:border-primary/40 hover:shadow-md min-h-[80px]"
-                        >
-                            {/* Placeholder visual (sem imagem no banco) */}
-                            <div className="w-full h-14 rounded-xl bg-gradient-to-br from-blue-50 to-blue-100
-                                            flex items-center justify-center text-2xl mb-0.5">
-                                🥐
-                            </div>
-                            <p className="text-sm font-semibold text-gray-800 leading-tight line-clamp-2">
-                                {produto.nome}
-                            </p>
-                            <div className="flex items-center justify-between w-full mt-auto">
-                                <span className="text-base font-bold text-primary">
-                                    {new Intl.NumberFormat('pt-BR', {
-                                        style: 'currency',
-                                        currency: 'BRL',
-                                    }).format(Number(produto.preco))}
-                                </span>
-                                <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center
-                                                group-active:scale-90 transition-transform">
-                                    <Plus className="w-4 h-4 text-white" />
+                    {produtosFiltrados.map((produto) => {
+                        const isPesado = (produto.unidade_medida ?? '').toLowerCase() === 'kg'
+                        return (
+                            <button
+                                key={produto.id}
+                                onClick={() => onAddProduto(produto)}
+                                className={`group flex flex-col items-start gap-1.5 p-3 rounded-2xl bg-white border
+                                       text-left active:scale-95 transition-all touch-manipulation
+                                       hover:shadow-md min-h-[80px] ${isPesado
+                                        ? 'border-emerald-200 hover:border-emerald-400'
+                                        : 'border-blue-100 hover:border-primary/40'
+                                    }`}
+                            >
+                                {/* Placeholder visual + badge kg */}
+                                <div className={`w-full h-14 rounded-xl flex items-center justify-center text-2xl mb-0.5 relative ${isPesado
+                                    ? 'bg-gradient-to-br from-emerald-50 to-emerald-100'
+                                    : 'bg-gradient-to-br from-blue-50 to-blue-100'
+                                    }`}>
+                                    {isPesado ? '⚖️' : '🥐'}
+                                    {isPesado && (
+                                        <span className="absolute top-1 right-1 bg-emerald-600 text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-md uppercase tracking-wider flex items-center gap-0.5">
+                                            <Scale className="w-2.5 h-2.5" />
+                                            kg
+                                        </span>
+                                    )}
                                 </div>
-                            </div>
-                        </button>
-                    ))}
+                                <p className="text-sm font-semibold text-gray-800 leading-tight line-clamp-2">
+                                    {produto.nome}
+                                </p>
+                                <div className="flex items-center justify-between w-full mt-auto">
+                                    <span className={`text-base font-bold ${isPesado ? 'text-emerald-700' : 'text-primary'}`}>
+                                        {new Intl.NumberFormat('pt-BR', {
+                                            style: 'currency',
+                                            currency: 'BRL',
+                                        }).format(Number(produto.preco))}
+                                        {isPesado && (
+                                            <span className="text-[10px] font-medium opacity-70 ml-0.5">/kg</span>
+                                        )}
+                                    </span>
+                                    <div className={`w-7 h-7 rounded-full flex items-center justify-center
+                                                group-active:scale-90 transition-transform ${isPesado ? 'bg-emerald-600' : 'bg-primary'
+                                        }`}>
+                                        {isPesado
+                                            ? <Scale className="w-4 h-4 text-white" />
+                                            : <Plus className="w-4 h-4 text-white" />
+                                        }
+                                    </div>
+                                </div>
+                            </button>
+                        )
+                    })}
                 </div>
             )}
         </div>

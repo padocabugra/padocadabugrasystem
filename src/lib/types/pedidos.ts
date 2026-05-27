@@ -44,11 +44,27 @@ export interface Pedido {
 // ─────────────────────────────────────────
 // Item no carrinho local (estado da página)
 // ─────────────────────────────────────────
+//
+// Itens "un" (unidade discreta) fundem por produto_id — somar +1 incrementa
+// a quantidade da mesma linha.
+//
+// Itens "kg" (vendidos por peso) sao linhas independentes — cada pesagem
+// gera um cart_item_id novo, mesmo que seja o mesmo produto. Isso preserva
+// o registro individual de cada peso anotado pelo garcom.
+//
+// Pra itens "kg":
+//   - preco        = preço por kg (snapshot do produto.preco)
+//   - quantidade   = peso em kg (ex: 0.500 pra 500g)
+//   - peso_gramas  = peso em gramas (display)
+//   - subtotal     = quantidade * preco  (igual aos itens "un")
 export interface ItemCarrinho {
+    cart_item_id: string         // uuid local, unico por linha do carrinho
     produto_id: string
     nome: string
-    preco: number                // preco unitário do produto
-    quantidade: number
+    preco: number                // preço unitário OU preço por kg
+    quantidade: number           // unidades OU peso em kg
+    unidade_medida: string       // 'un' | 'kg' | 'g' | 'l' | 'ml'
+    peso_gramas?: number         // apenas em itens pesados, pra display
 }
 
 // ─────────────────────────────────────────

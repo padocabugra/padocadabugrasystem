@@ -6,9 +6,19 @@ import { createClient } from '@/lib/supabase/client'
 import BuscaClienteCPF from '@/components/pedidos/BuscaClienteCPF'
 import CatalogoProdutos from '@/components/pedidos/CatalogoProdutos'
 import CarrinhoLateral from '@/components/pedidos/CarrinhoLateral'
+import ModalPesagem from '@/components/pedidos/ModalPesagem'
 import type { Produto } from '@/lib/types'
 import type { ItemCarrinho, TipoPedido } from '@/lib/types/pedidos'
 import { ShoppingCart as CartIcon, MapPin, Truck, UserX, CreditCard, X } from 'lucide-react'
+
+// Gerador local de id pra cart_item_id. crypto.randomUUID() existe em todos os
+// browsers modernos. Fallback de timestamp evita explodir em ambientes velhos.
+function novoCartItemId(): string {
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+        return crypto.randomUUID()
+    }
+    return `cart-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
 
 interface Comanda {
     id: string
@@ -38,6 +48,16 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
     const [destinoCozinha, setDestinoCozinha] = useState(true)
     const [isSubmitting, setIsSubmitting] = useState(false)
 
+    // ── Pesagem ──
+    // produtoParaPesar: produto kg aguardando peso (clique no card kg ou re-pesagem)
+    // cartItemEmReweigh: linha kg sendo re-pesada (null = nova pesagem)
+    const [produtoParaPesar, setProdutoParaPesar] = useState<Produto | null>(null)
+    const [cartItemEmReweigh, setCartItemEmReweigh] = useState<string | null>(null)
+
+    // Helper case-insensitive pra checar se um produto é vendido por kg
+    const isKg = (p: { unidade_medida?: string | null }) =>
+        (p.unidade_medida ?? '').toLowerCase() === 'kg'
+
     // ── Comandas ──
     const [comandasLivres, setComandasLivres] = useState<Comanda[]>([])
     const [selectedComandaId, setSelectedComandaId] = useState<string | null>(null)
@@ -64,12 +84,23 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
     }, [tipoPedido, fetchComandasLivres])
 
     // ── Gerenciamento do Carrinho ──
+    //
+    // Itens "un" fundem por produto_id (clicar de novo incrementa quantidade).
+    // Itens "kg" abrem ModalPesagem; cada pesagem gera uma linha nova com
+    // cart_item_id proprio, mesmo se for o mesmo produto.
     const handleAddProduto = useCallback((produto: Produto) => {
+        if (isKg(produto)) {
+            setProdutoParaPesar(produto)
+            setCartItemEmReweigh(null)
+            return
+        }
         setCarrinho((prev) => {
-            const existente = prev.find((i) => i.produto_id === produto.id)
+            const existente = prev.find(
+                (i) => i.produto_id === produto.id && (i.unidade_medida ?? '').toLowerCase() !== 'kg'
+            )
             if (existente) {
                 return prev.map((i) =>
-                    i.produto_id === produto.id
+                    i.cart_item_id === existente.cart_item_id
                         ? { ...i, quantidade: i.quantidade + 1 }
                         : i
                 )
@@ -77,36 +108,96 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
             return [
                 ...prev,
                 {
+                    cart_item_id: novoCartItemId(),
                     produto_id: produto.id,
                     nome: produto.nome,
                     preco: Number(produto.preco),
                     quantidade: 1,
+                    unidade_medida: produto.unidade_medida || 'un',
                 },
             ]
         })
     }, [])
 
-    const handleAddById = useCallback((produto_id: string) => {
+    // Botao + no carrinho. So funciona pra itens "un" — itens "kg" usam o modal.
+    const handleAddById = useCallback((cart_item_id: string) => {
         setCarrinho((prev) =>
             prev.map((i) =>
-                i.produto_id === produto_id
+                i.cart_item_id === cart_item_id && (i.unidade_medida ?? '').toLowerCase() !== 'kg'
                     ? { ...i, quantidade: i.quantidade + 1 }
                     : i
             )
         )
     }, [])
 
-    const handleRemoveById = useCallback((produto_id: string) => {
+    // Botao -. Itens "un" decrementam; itens "kg" sao removidos por inteiro
+    // (a logica de ajuste fino fica no modal de re-pesagem).
+    const handleRemoveById = useCallback((cart_item_id: string) => {
         setCarrinho((prev) => {
-            const item = prev.find((i) => i.produto_id === produto_id)
+            const item = prev.find((i) => i.cart_item_id === cart_item_id)
             if (!item) return prev
-            if (item.quantidade === 1) return prev.filter((i) => i.produto_id !== produto_id)
+            const itemEhKg = (item.unidade_medida ?? '').toLowerCase() === 'kg'
+            if (itemEhKg || item.quantidade <= 1) {
+                return prev.filter((i) => i.cart_item_id !== cart_item_id)
+            }
             return prev.map((i) =>
-                i.produto_id === produto_id
+                i.cart_item_id === cart_item_id
                     ? { ...i, quantidade: i.quantidade - 1 }
                     : i
             )
         })
+    }, [])
+
+    // Re-pesagem: abre modal preenchido com o peso atual do item kg
+    const handleRePesar = useCallback((cart_item_id: string) => {
+        const item = carrinho.find((i) => i.cart_item_id === cart_item_id)
+        if (!item || (item.unidade_medida ?? '').toLowerCase() !== 'kg') return
+        const produto = produtos.find((p) => p.id === item.produto_id)
+        if (!produto) return
+        setProdutoParaPesar(produto)
+        setCartItemEmReweigh(cart_item_id)
+    }, [carrinho, produtos])
+
+    // Callback do ModalPesagem: produto + peso em gramas → linha no carrinho.
+    const handleConfirmarPesagem = useCallback((produtoConfirmado: Produto, pesoGramas: number) => {
+        if (pesoGramas <= 0) {
+            setProdutoParaPesar(null)
+            setCartItemEmReweigh(null)
+            return
+        }
+        const pesoKg = pesoGramas / 1000
+        const precoPorKg = Number(produtoConfirmado.preco)
+
+        setCarrinho((prev) => {
+            // Re-pesagem: atualiza linha existente
+            if (cartItemEmReweigh) {
+                return prev.map((i) =>
+                    i.cart_item_id === cartItemEmReweigh
+                        ? { ...i, quantidade: pesoKg, peso_gramas: pesoGramas }
+                        : i
+                )
+            }
+            // Nova pesagem: linha independente, mesmo se o produto se repetir
+            return [
+                ...prev,
+                {
+                    cart_item_id: novoCartItemId(),
+                    produto_id: produtoConfirmado.id,
+                    nome: produtoConfirmado.nome,
+                    preco: precoPorKg,
+                    quantidade: pesoKg,
+                    unidade_medida: 'kg',
+                    peso_gramas: pesoGramas,
+                },
+            ]
+        })
+        setProdutoParaPesar(null)
+        setCartItemEmReweigh(null)
+    }, [cartItemEmReweigh])
+
+    const handleCancelarPesagem = useCallback(() => {
+        setProdutoParaPesar(null)
+        setCartItemEmReweigh(null)
     }, [])
 
     function handleVendaAvulsa() {
@@ -166,6 +257,8 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
         setSemComanda(false)
         setCarrinho([])
         setDestinoCozinha(true)
+        setProdutoParaPesar(null)
+        setCartItemEmReweigh(null)
         fetchComandasLivres()
     }
 
@@ -351,9 +444,11 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
 
                 {/* Seção 4: Catálogo */}
                 <div className="bg-white rounded-2xl border border-blue-100 p-4 shadow-sm flex-1">
+                    <p className="text-sm font-semibold text-gray-700 mb-3">3. Catálogo de Produtos</p>
                     <CatalogoProdutos
                         produtos={produtos}
                         onAddProduto={handleAddProduto}
+                        hideHeader
                     />
                 </div>
             </div>
@@ -364,11 +459,26 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
                     itens={carrinho}
                     onAdd={handleAddById}
                     onRemove={handleRemoveById}
+                    onRePesar={handleRePesar}
                     onSubmit={handleSubmit}
                     isSubmitting={isSubmitting}
                     destinoCozinha={destinoCozinha}
                     onDestinoChange={setDestinoCozinha}
                 />
+                {/* ── Modal de Pesagem ── */}
+                {produtoParaPesar && (
+                    <ModalPesagem
+                        produto={produtoParaPesar}
+                        onConfirmar={handleConfirmarPesagem}
+                        onCancelar={handleCancelarPesagem}
+                        pesoInicialGramas={
+                            cartItemEmReweigh
+                                ? carrinho.find((i) => i.cart_item_id === cartItemEmReweigh)?.peso_gramas
+                                : undefined
+                        }
+                    />
+                )}
+
                 {/* ── Botão Flutuante (Mobile Only) ── */}
                 {carrinho.length > 0 && (
                     <button
@@ -381,9 +491,9 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
                                active:scale-95 transition-transform border-4 border-white"
                     >
                         <CartIcon className="w-6 h-6" />
-                        <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-black 
+                        <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-black
                                      w-6 h-6 rounded-full flex items-center justify-center border-2 border-white">
-                            {carrinho.reduce((acc, i) => acc + i.quantidade, 0)}
+                            {carrinho.reduce((acc, i) => acc + ((i.unidade_medida ?? '').toLowerCase() === 'kg' ? 1 : i.quantidade), 0)}
                         </span>
                     </button>
                 )}
