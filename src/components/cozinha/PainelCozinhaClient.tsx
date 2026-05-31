@@ -291,10 +291,14 @@ function PedidoCard({
     pedido,
     onAvancar,
     onClickProduto,
+    onCancelar,
+    onRetirar,
 }: {
     pedido: PedidoCozinha
     onAvancar: (id: string, proximoStatus: KanbanColumn) => void
     onClickProduto: (nome: string, produtoId?: string) => void
+    onCancelar: (id: string, label: string) => void
+    onRetirar: (id: string) => void
 }) {
     useTickEvery30s()
     const tempo = formatDistanceToNow(new Date(pedido.created_at), {
@@ -363,9 +367,9 @@ function PedidoCard({
                 )}
             </ul>
 
-            {/* Botão de ação */}
-            {proximoStatus && btnLabel && (
-                <div className="px-4 pb-4">
+            {/* Botões de ação */}
+            <div className="px-4 pb-4 space-y-2">
+                {proximoStatus && btnLabel && (
                     <button
                         onClick={() => onAvancar(pedido.id, proximoStatus)}
                         className={`w-full h-11 rounded-xl text-white text-sm font-bold transition-all
@@ -373,8 +377,28 @@ function PedidoCard({
                     >
                         {btnLabel}
                     </button>
-                </div>
-            )}
+                )}
+                {pedido.status === 'pronto' && (
+                    <button
+                        onClick={() => onRetirar(pedido.id)}
+                        className="w-full h-11 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold
+                                   transition-all active:scale-95 touch-manipulation shadow-lg shadow-emerald-400/30
+                                   flex items-center justify-center gap-2"
+                    >
+                        <CheckCircle2 className="w-4 h-4" />
+                        Confirmar Retirada
+                    </button>
+                )}
+                <button
+                    onClick={() => onCancelar(pedido.id, pedido.numero_mesa ? `Mesa ${pedido.numero_mesa}` : 'Balcão')}
+                    className="w-full h-9 rounded-xl bg-white border border-red-200 text-red-600 text-xs font-bold
+                               hover:bg-red-50 active:scale-95 transition-all touch-manipulation
+                               flex items-center justify-center gap-1.5"
+                >
+                    <X className="w-3.5 h-3.5" />
+                    Cancelar pedido
+                </button>
+            </div>
         </div>
     )
 }
@@ -409,11 +433,15 @@ function Coluna({
     pedidos,
     onAvancar,
     onClickProduto,
+    onCancelar,
+    onRetirar,
 }: {
     status: KanbanColumn
     pedidos: PedidoCozinha[]
     onAvancar: (id: string, proximoStatus: KanbanColumn) => void
     onClickProduto: (nome: string, produtoId?: string) => void
+    onCancelar: (id: string, label: string) => void
+    onRetirar: (id: string) => void
 }) {
     const cfg = COLUNA_CONFIG[status]
     const Icon = cfg.icon
@@ -445,6 +473,8 @@ function Coluna({
                             pedido={pedido}
                             onAvancar={onAvancar}
                             onClickProduto={onClickProduto}
+                            onCancelar={onCancelar}
+                            onRetirar={onRetirar}
                         />
                     ))
                 )}
@@ -494,6 +524,39 @@ export default function PainelCozinhaClient({ pedidosIniciais }: PainelCozinhaCl
             toast.error('Erro ao atualizar pedido')
         }
     }, [supabase])
+
+    // ── Ação: cancelar pedido (cozinha também pode cancelar) ──────────────────
+    const handleCancelar = useCallback(async (id: string, label: string) => {
+        if (!confirm(`Cancelar o pedido de ${label}? Ele sai da cozinha e não é cobrado.`)) return
+        const anteriores = pedidos
+        setPedidos((prev) => prev.filter((p) => p.id !== id))
+        const { error } = await supabase
+            .from('pedidos')
+            .update({ status: 'cancelado', updated_at: getAgoraUTC() })
+            .eq('id', id)
+        if (error) {
+            setPedidos(anteriores)
+            toast.error('Erro ao cancelar pedido')
+        } else {
+            toast.success('Pedido cancelado')
+        }
+    }, [supabase, pedidos])
+
+    // ── Ação: confirmar retirada (bump) — sai da cozinha, segue cobrável no caixa ──
+    const handleRetirar = useCallback(async (id: string) => {
+        const anteriores = pedidos
+        setPedidos((prev) => prev.filter((p) => p.id !== id))
+        const { error } = await supabase
+            .from('pedidos')
+            .update({ retirado_cozinha: true })
+            .eq('id', id)
+        if (error) {
+            setPedidos(anteriores)
+            toast.error('Erro ao confirmar retirada')
+        } else {
+            toast.success('Retirada confirmada')
+        }
+    }, [supabase, pedidos])
 
     // ── Atalhos de teclado ───────────────────────────────────────────────────
     const handleKeyPress = useCallback((key: string) => {
@@ -562,6 +625,8 @@ export default function PainelCozinhaClient({ pedidosIniciais }: PainelCozinhaCl
                     const novo = payload.new as any
 
                     if (novo.status === 'entregue' || novo.status === 'cancelado') return
+                    // Vendas "direto pro caixa" NÃO entram na cozinha (só itens de cozinha).
+                    if (novo.destino_cozinha === false) return
 
                     const { data: itens } = await supabase
                         .from('itens_pedido')
@@ -595,7 +660,8 @@ export default function PainelCozinhaClient({ pedidosIniciais }: PainelCozinhaCl
                 (payload) => {
                     const atualizado = payload.new as any
 
-                    if (atualizado.status === 'entregue' || atualizado.status === 'cancelado') {
+                    // Sai da cozinha: pago/cancelado OU retirado (bump pelo garçom)
+                    if (atualizado.status === 'entregue' || atualizado.status === 'cancelado' || atualizado.retirado_cozinha === true) {
                         setPedidos((prev) => prev.filter((p) => p.id !== atualizado.id))
                         return
                     }
@@ -622,9 +688,9 @@ export default function PainelCozinhaClient({ pedidosIniciais }: PainelCozinhaCl
     return (
         <>
             <div className="flex flex-col lg:flex-row gap-4 lg:h-[calc(100vh-8rem)] min-h-0">
-                <Coluna status="pendente" pedidos={pendentes} onAvancar={handleAvancar} onClickProduto={handleClickProduto} />
-                <Coluna status="preparando" pedidos={preparandoList} onAvancar={handleAvancar} onClickProduto={handleClickProduto} />
-                <Coluna status="pronto" pedidos={prontos} onAvancar={handleAvancar} onClickProduto={handleClickProduto} />
+                <Coluna status="pendente" pedidos={pendentes} onAvancar={handleAvancar} onClickProduto={handleClickProduto} onCancelar={handleCancelar} onRetirar={handleRetirar} />
+                <Coluna status="preparando" pedidos={preparandoList} onAvancar={handleAvancar} onClickProduto={handleClickProduto} onCancelar={handleCancelar} onRetirar={handleRetirar} />
+                <Coluna status="pronto" pedidos={prontos} onAvancar={handleAvancar} onClickProduto={handleClickProduto} onCancelar={handleCancelar} onRetirar={handleRetirar} />
             </div>
 
             {/* Modal de Ficha Técnica */}

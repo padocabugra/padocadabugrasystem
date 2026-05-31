@@ -1,7 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus, Scale, Grid, Coffee, Cookie, Sandwich, Croissant, Package } from 'lucide-react'
+import { Plus, Scale, Grid, Coffee, Cookie, Sandwich, Croissant, Package, ChevronLeft, ChevronRight } from 'lucide-react'
+
+const PAGE_SIZE = 25
 import type { Produto } from '@/lib/types'
 
 // Estilo pastel por categoria — fundo (não selecionado), fundo intensificado
@@ -31,12 +33,29 @@ export default function CatalogoProdutos({ produtos, onAddProduto, hideHeader }:
 
     const [abaAtiva, setAbaAtiva] = useState('Todos')
     const [busca, setBusca] = useState('')
+    const [pagina, setPagina] = useState(1)
+
+    // Contagem por categoria — deixa explícito que o filtro mudou (ex: Bebidas é
+    // ~metade do catálogo, então Todos↔Bebidas parecia "não mudar").
+    const contagemCategoria = (cat: string) =>
+        cat === 'Todos'
+            ? produtos.length
+            : produtos.filter((p) => (p.categoria ?? 'Sem Categoria') === cat).length
 
     const produtosFiltrados = produtos.filter((p) => {
         const matchCategoria = abaAtiva === 'Todos' || (p.categoria ?? 'Sem Categoria') === abaAtiva
         const matchBusca = p.nome.toLowerCase().includes(busca.toLowerCase())
         return matchCategoria && matchBusca
     })
+
+    // Paginação — 25 por página por categoria (carregamento leve/rápido)
+    const totalPaginas = Math.max(1, Math.ceil(produtosFiltrados.length / PAGE_SIZE))
+    const paginaAtual = Math.min(pagina, totalPaginas)
+    const produtosPagina = produtosFiltrados.slice((paginaAtual - 1) * PAGE_SIZE, paginaAtual * PAGE_SIZE)
+
+    // Troca de categoria/busca volta pra página 1
+    const trocarCategoria = (cat: string) => { setAbaAtiva(cat); setPagina(1) }
+    const trocarBusca = (v: string) => { setBusca(v); setPagina(1) }
 
     return (
         <div className="flex flex-col gap-4 h-full">
@@ -49,7 +68,7 @@ export default function CatalogoProdutos({ produtos, onAddProduto, hideHeader }:
                 type="search"
                 placeholder="Buscar produto..."
                 value={busca}
-                onChange={(e) => setBusca(e.target.value)}
+                onChange={(e) => trocarBusca(e.target.value)}
                 className="h-11 w-full px-4 rounded-xl border border-blue-100 bg-white text-sm
                            focus:outline-none focus:ring-2 focus:ring-primary/40"
             />
@@ -63,7 +82,7 @@ export default function CatalogoProdutos({ produtos, onAddProduto, hideHeader }:
                     return (
                         <button
                             key={cat}
-                            onClick={() => setAbaAtiva(cat)}
+                            onClick={() => trocarCategoria(cat)}
                             className={`shrink-0 h-9 px-3 rounded-full text-sm transition-all duration-200 touch-manipulation
                                 inline-flex items-center gap-1.5
                                 ${isActive
@@ -73,6 +92,9 @@ export default function CatalogoProdutos({ produtos, onAddProduto, hideHeader }:
                         >
                             <Icon className="w-3.5 h-3.5" />
                             {cat}
+                            <span className={`ml-0.5 text-[11px] font-bold ${isActive ? 'opacity-90' : 'opacity-50'}`}>
+                                {contagemCategoria(cat)}
+                            </span>
                         </button>
                     )
                 })}
@@ -85,8 +107,8 @@ export default function CatalogoProdutos({ produtos, onAddProduto, hideHeader }:
                     <p className="text-sm">Nenhum produto encontrado</p>
                 </div>
             ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-3 overflow-y-auto pr-1">
-                    {produtosFiltrados.map((produto) => {
+                <div key={`${abaAtiva}-${paginaAtual}`} className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-3 overflow-y-auto pr-1">
+                    {produtosPagina.map((produto) => {
                         const isPesado = (produto.unidade_medida ?? '').toLowerCase() === 'kg'
                         return (
                             <button
@@ -137,6 +159,35 @@ export default function CatalogoProdutos({ produtos, onAddProduto, hideHeader }:
                             </button>
                         )
                     })}
+                </div>
+            )}
+
+            {/* Paginação — 25 por página */}
+            {totalPaginas > 1 && (
+                <div className="flex items-center justify-center gap-3 pt-1">
+                    <button
+                        type="button"
+                        onClick={() => setPagina((p) => Math.max(1, p - 1))}
+                        disabled={paginaAtual <= 1}
+                        className="w-9 h-9 rounded-lg border border-blue-100 bg-white flex items-center justify-center
+                                   text-primary hover:bg-blue-50 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                        aria-label="Página anterior"
+                    >
+                        <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <span className="text-xs font-semibold text-gray-500">
+                        Página {paginaAtual} de {totalPaginas}
+                    </span>
+                    <button
+                        type="button"
+                        onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
+                        disabled={paginaAtual >= totalPaginas}
+                        className="w-9 h-9 rounded-lg border border-blue-100 bg-white flex items-center justify-center
+                                   text-primary hover:bg-blue-50 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                        aria-label="Próxima página"
+                    >
+                        <ChevronRight className="w-4 h-4" />
+                    </button>
                 </div>
             )}
         </div>

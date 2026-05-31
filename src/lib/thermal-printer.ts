@@ -49,6 +49,29 @@ export interface DadosImpressaoNFCe {
     cpfCliente?: string
 }
 
+// Dados pro comprovante de FECHAMENTO DE CAIXA (relatorio financeiro do turno).
+// Espelha o resumo calculado pela RPC resumo_caixa_dia + o valor contado/diferenca
+// apurados no fechamento. Nao e documento fiscal — e relatorio interno de conferencia.
+export interface DadosImpressaoFechamento {
+    razaoSocial: string
+    cnpj?: string
+    operador: string
+    dataHora: string
+    aberturaValor: number
+    totalVendas: number
+    qtdVendas: number
+    totalDinheiro: number
+    totalPix: number
+    totalDebito: number
+    totalCredito: number
+    totalSangrias: number
+    totalReforcos: number
+    saldoEsperadoDinheiro: number
+    valorContado: number
+    diferenca: number          // contado - esperado (>0 sobra, <0 falta, 0 confere)
+    observacao?: string
+}
+
 // True quando o navegador tem WebUSB disponivel (HTTPS + Chrome/Edge).
 export function webUsbDisponivel(): boolean {
     return typeof navigator !== 'undefined' && 'usb' in navigator
@@ -237,10 +260,95 @@ function formatBRL(v: number): string {
     return v.toFixed(2).replace('.', ',')
 }
 
-// Imprime o DANFE NFC-e enviando bytes ESC/POS pra qualquer impressora
-// pareada (USB ou Serial). Throw se falhar.
-export async function imprimirNFCe(impressora: ImpressoraPareada, dados: DadosImpressaoNFCe): Promise<void> {
-    const bytes = montarCupomEscPos(dados)
+// Linha esquerda/direita justificada em `cols` colunas (rotulo a esquerda,
+// valor colado na direita). Trunca o rotulo se necessario pra nunca estourar.
+function linhaLR(esq: string, dir: string, cols = 48): string {
+    const espacos = cols - esq.length - dir.length
+    if (espacos < 1) {
+        const corte = Math.max(0, cols - dir.length - 1)
+        return esq.slice(0, corte) + ' ' + dir
+    }
+    return esq + ' '.repeat(espacos) + dir
+}
+
+// Constroi os bytes ESC/POS do comprovante de FECHAMENTO DE CAIXA em 80mm.
+// Relatorio financeiro de conferencia do turno — cabecalho, vendas por forma,
+// sangrias/reforcos, esperado x contado, diferenca e linha de assinatura.
+function montarFechamentoEscPos(dados: DadosImpressaoFechamento): Uint8Array {
+    const enc = new ReceiptPrinterEncoder({
+        language: 'esc-pos',
+        columns: 48,
+        feedBeforeCut: 3,
+        newline: '\n',
+    })
+
+    const sep = '-'.repeat(48)
+    const sepForte = '='.repeat(48)
+
+    enc
+        .initialize()
+        .align('center')
+        .bold(true)
+        .line(dados.razaoSocial)
+        .bold(false)
+
+    if (dados.cnpj) enc.size('small').line(`CNPJ: ${dados.cnpj}`).size('normal')
+
+    enc
+        .line(sep)
+        .bold(true)
+        .line('FECHAMENTO DE CAIXA')
+        .bold(false)
+        .line(sep)
+        .align('left')
+        .line(`Operador: ${dados.operador}`.slice(0, 48))
+        .line(`Emitido:  ${dados.dataHora}`.slice(0, 48))
+        .line(sep)
+        .line(linhaLR('Fundo de troco', formatBRL(dados.aberturaValor)))
+        .line(linhaLR(`Vendas (${dados.qtdVendas})`, formatBRL(dados.totalVendas)))
+        .line(sep)
+        .bold(true)
+        .line('RECEBIMENTOS POR FORMA')
+        .bold(false)
+        .line(linhaLR('  Dinheiro', formatBRL(dados.totalDinheiro)))
+        .line(linhaLR('  PIX', formatBRL(dados.totalPix)))
+        .line(linhaLR('  Cartao Debito', formatBRL(dados.totalDebito)))
+        .line(linhaLR('  Cartao Credito', formatBRL(dados.totalCredito)))
+        .line(sep)
+        .line(linhaLR('Sangrias', '- ' + formatBRL(dados.totalSangrias)))
+        .line(linhaLR('Reforcos', '+ ' + formatBRL(dados.totalReforcos)))
+        .line(sepForte)
+
+    const dif = dados.diferenca
+    const tagDif = dif === 0 ? 'CONFERE' : dif > 0 ? 'SOBRA' : 'FALTA'
+
+    enc
+        .bold(true)
+        .line(linhaLR('ESPERADO EM DINHEIRO', formatBRL(dados.saldoEsperadoDinheiro)))
+        .line(linhaLR('CONTADO', formatBRL(dados.valorContado)))
+        .line(linhaLR(`DIFERENCA (${tagDif})`, formatBRL(Math.abs(dif))))
+        .bold(false)
+        .line(sepForte)
+
+    if (dados.observacao && dados.observacao.trim().length > 0) {
+        enc.align('left').line('Obs: ' + dados.observacao).line(sep)
+    }
+
+    enc
+        .align('center')
+        .newline()
+        .line('_______________________')
+        .line('Assinatura do responsavel')
+        .newline()
+        .newline()
+        .cut('partial')
+
+    return enc.encode()
+}
+
+// Envia bytes ESC/POS crus pra impressora pareada (USB ou Serial). Throw se falhar.
+// Centraliza o transporte; quem decide o conteudo e o montador (NFC-e/fechamento).
+async function enviarBytes(impressora: ImpressoraPareada, bytes: Uint8Array): Promise<void> {
     if (impressora.tipo === 'usb') {
         const { endpointNumber } = await prepararEndpointEscrita(impressora.device)
         const buffer = new ArrayBuffer(bytes.byteLength)
@@ -265,4 +373,15 @@ export async function imprimirNFCe(impressora: ImpressoraPareada, dados: DadosIm
     } finally {
         writer.releaseLock()
     }
+}
+
+// Imprime o DANFE NFC-e enviando bytes ESC/POS pra qualquer impressora
+// pareada (USB ou Serial). Throw se falhar.
+export async function imprimirNFCe(impressora: ImpressoraPareada, dados: DadosImpressaoNFCe): Promise<void> {
+    await enviarBytes(impressora, montarCupomEscPos(dados))
+}
+
+// Imprime o comprovante de FECHAMENTO DE CAIXA (relatorio do turno). Throw se falhar.
+export async function imprimirFechamento(impressora: ImpressoraPareada, dados: DadosImpressaoFechamento): Promise<void> {
+    await enviarBytes(impressora, montarFechamentoEscPos(dados))
 }

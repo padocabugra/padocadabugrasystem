@@ -5,20 +5,20 @@ import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import {
     CreditCard, RotateCcw, Ban, RefreshCw,
-    ArrowLeft, Loader2, AlertTriangle,
+    ArrowLeft, Loader2, AlertTriangle, Plus, Search,
 } from 'lucide-react'
 import Link from 'next/link'
 
 interface Comanda {
     id: string
     numero: number
-    status: 'livre' | 'ocupada' | 'bloqueada'
+    status: 'livre' | 'consumo' | 'bloqueada'
     updated_at: string
 }
 
 const statusConfig: Record<Comanda['status'], { color: string; label: string; dot: string }> = {
     livre: { color: 'bg-emerald-50 border-emerald-300 text-emerald-700', label: 'Livre', dot: 'bg-emerald-500' },
-    ocupada: { color: 'bg-amber-50 border-amber-300 text-amber-700', label: 'Ocupada', dot: 'bg-amber-500' },
+    consumo: { color: 'bg-amber-50 border-amber-300 text-amber-700', label: 'Em consumo', dot: 'bg-amber-500' },
     bloqueada: { color: 'bg-red-50 border-red-300 text-red-600', label: 'Bloqueada', dot: 'bg-red-500' },
 }
 
@@ -29,6 +29,9 @@ export default function ComandasAdminPage() {
     const [loading, setLoading] = useState(true)
     const [fetchError, setFetchError] = useState<string | null>(null)
     const [actionLoading, setActionLoading] = useState<string | null>(null)
+    // Filtro de visualização (evita despejar 100 comandas de uma vez) + busca por número
+    const [filtro, setFiltro] = useState<Comanda['status']>('consumo')
+    const [busca, setBusca] = useState('')
     const supabase = createClient()
 
     const fetchComandas = useCallback(async () => {
@@ -101,8 +104,27 @@ export default function ComandasAdminPage() {
     }
 
     const livres = comandas.filter(c => c.status === 'livre').length
-    const ocupadas = comandas.filter(c => c.status === 'ocupada').length
+    const ocupadas = comandas.filter(c => c.status === 'consumo').length
     const bloqueadas = comandas.filter(c => c.status === 'bloqueada').length
+
+    const buscaNum = busca.trim()
+    const comandasFiltradas = comandas.filter(c =>
+        c.status === filtro && (buscaNum === '' || String(c.numero).includes(buscaNum))
+    )
+
+    // Adiciona uma nova comanda com o próximo número (amplia o pool de comandas)
+    async function handleAdicionarComanda() {
+        const proximo = comandas.reduce((max, c) => Math.max(max, c.numero), 0) + 1
+        setActionLoading('add')
+        const { error } = await supabase.from('comandas').insert({ numero: proximo, status: 'livre' })
+        setActionLoading(null)
+        if (error) {
+            toast.error('Erro ao adicionar comanda', { description: error.message })
+            return
+        }
+        toast.success(`Comanda ${proximo} adicionada!`)
+        fetchComandas()
+    }
 
     return (
         <div className="max-w-4xl mx-auto space-y-6">
@@ -127,39 +149,82 @@ export default function ComandasAdminPage() {
                         </div>
                     </div>
                 </div>
+                <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+                    <button
+                        onClick={handleAdicionarComanda}
+                        disabled={actionLoading === 'add'}
+                        className="h-11 px-5 rounded-xl bg-emerald-600 text-white font-semibold text-sm
+                                   flex items-center gap-2 hover:bg-emerald-700 active:scale-95 transition-all
+                                   disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
+                    >
+                        {actionLoading === 'add' ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                            <Plus className="w-4 h-4" />
+                        )}
+                        Adicionar Comanda
+                    </button>
+                    <button
+                        onClick={handleResetGeral}
+                        disabled={actionLoading === 'reset-all' || ocupadas === 0}
+                        className="h-11 px-5 rounded-xl bg-red-500 text-white font-semibold text-sm
+                                   flex items-center gap-2 hover:bg-red-600 active:scale-95 transition-all
+                                   disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
+                    >
+                        {actionLoading === 'reset-all' ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                            <RefreshCw className="w-4 h-4" />
+                        )}
+                        Reset Geral (Fim do Dia)
+                    </button>
+                </div>
+            </div>
+
+            {/* Resumo = filtros clicáveis (evita mostrar as 100 de uma vez) */}
+            <div className="grid grid-cols-3 gap-3">
                 <button
-                    onClick={handleResetGeral}
-                    disabled={actionLoading === 'reset-all' || ocupadas === 0}
-                    className="h-11 px-5 rounded-xl bg-red-500 text-white font-semibold text-sm
-                               flex items-center gap-2 hover:bg-red-600 active:scale-95 transition-all
-                               disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation shrink-0 self-start sm:self-auto"
+                    onClick={() => setFiltro('consumo')}
+                    className={`rounded-2xl border-2 p-4 text-center transition-all ${filtro === 'consumo' ? 'bg-amber-100 border-amber-400 ring-2 ring-amber-200' : 'bg-amber-50 border-amber-200 hover:border-amber-300'}`}
                 >
-                    {actionLoading === 'reset-all' ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                        <RefreshCw className="w-4 h-4" />
-                    )}
-                    Reset Geral (Fim do Dia)
+                    <p className="text-2xl font-extrabold text-amber-700">{ocupadas}</p>
+                    <p className="text-xs font-semibold text-amber-600 mt-1">Abertas (em uso)</p>
+                </button>
+                <button
+                    onClick={() => setFiltro('livre')}
+                    className={`rounded-2xl border-2 p-4 text-center transition-all ${filtro === 'livre' ? 'bg-emerald-100 border-emerald-400 ring-2 ring-emerald-200' : 'bg-emerald-50 border-emerald-200 hover:border-emerald-300'}`}
+                >
+                    <p className="text-2xl font-extrabold text-emerald-700">{livres}</p>
+                    <p className="text-xs font-semibold text-emerald-600 mt-1">Disponíveis</p>
+                </button>
+                <button
+                    onClick={() => setFiltro('bloqueada')}
+                    className={`rounded-2xl border-2 p-4 text-center transition-all ${filtro === 'bloqueada' ? 'bg-red-100 border-red-400 ring-2 ring-red-200' : 'bg-red-50 border-red-200 hover:border-red-300'}`}
+                >
+                    <p className="text-2xl font-extrabold text-red-600">{bloqueadas}</p>
+                    <p className="text-xs font-semibold text-red-500 mt-1">Bloqueadas</p>
                 </button>
             </div>
 
-            {/* Resumo */}
-            <div className="grid grid-cols-3 gap-3">
-                <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-center">
-                    <p className="text-2xl font-extrabold text-emerald-700">{livres}</p>
-                    <p className="text-xs font-semibold text-emerald-600 mt-1">Livres</p>
+            {/* Busca por número + rótulo do filtro ativo */}
+            <div className="flex items-center gap-3 flex-wrap">
+                <div className="relative flex-1 min-w-[180px]">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                        type="number"
+                        inputMode="numeric"
+                        placeholder="Buscar comanda pelo número..."
+                        value={busca}
+                        onChange={(e) => setBusca(e.target.value)}
+                        className="w-full h-11 pl-9 pr-3 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    />
                 </div>
-                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-center">
-                    <p className="text-2xl font-extrabold text-amber-700">{ocupadas}</p>
-                    <p className="text-xs font-semibold text-amber-600 mt-1">Ocupadas</p>
-                </div>
-                <div className="bg-red-50 border border-red-200 rounded-2xl p-4 text-center">
-                    <p className="text-2xl font-extrabold text-red-600">{bloqueadas}</p>
-                    <p className="text-xs font-semibold text-red-500 mt-1">Bloqueadas</p>
-                </div>
+                <span className="text-xs text-gray-400">
+                    {comandasFiltradas.length} {filtro === 'consumo' ? 'em uso' : filtro === 'livre' ? 'disponíveis' : 'bloqueadas'}
+                </span>
             </div>
 
-            {/* Grid de Comandas */}
+            {/* Grid de Comandas (somente o filtro ativo) */}
             {loading ? (
                 <div className="flex items-center justify-center py-20 text-gray-400">
                     <Loader2 className="w-6 h-6 animate-spin mr-2" />
@@ -178,14 +243,22 @@ export default function ComandasAdminPage() {
                         Tentar Novamente
                     </button>
                 </div>
-            ) : comandas.length === 0 ? (
+            ) : comandasFiltradas.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 text-gray-400">
                     <CreditCard className="w-10 h-10 mb-3 text-gray-300" />
-                    <p className="text-sm font-medium">Nenhuma comanda cadastrada.</p>
+                    <p className="text-sm font-medium">
+                        {buscaNum !== ''
+                            ? `Nenhuma comanda ${buscaNum} ${filtro === 'consumo' ? 'em uso' : filtro === 'livre' ? 'disponível' : 'bloqueada'}.`
+                            : filtro === 'consumo'
+                                ? 'Nenhuma comanda em uso no momento.'
+                                : filtro === 'livre'
+                                    ? 'Nenhuma comanda disponível.'
+                                    : 'Nenhuma comanda bloqueada.'}
+                    </p>
                 </div>
             ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                    {comandas.map((comanda) => {
+                    {comandasFiltradas.map((comanda) => {
                         const config = statusConfig[comanda.status] ?? FALLBACK_CONFIG
                         const isLoading = actionLoading === `reset-${comanda.numero}` || actionLoading === `block-${comanda.numero}`
 

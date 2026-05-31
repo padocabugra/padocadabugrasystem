@@ -7,10 +7,12 @@ import {
     pedirImpressoraUSB,
     pedirImpressoraSerial,
     imprimirNFCe,
+    imprimirFechamento,
     webUsbDisponivel,
     webSerialDisponivel,
     type ImpressoraPareada,
     type DadosImpressaoNFCe,
+    type DadosImpressaoFechamento,
 } from '@/lib/thermal-printer'
 
 interface PrinterCtx {
@@ -26,6 +28,8 @@ interface PrinterCtx {
     pearSerial: () => Promise<void>
     /** Imprime um DANFE. Toast em caso de erro; nao quebra venda. */
     imprimir: (dados: DadosImpressaoNFCe) => Promise<boolean>
+    /** Imprime o comprovante de fechamento de caixa. Toast em caso de erro. */
+    imprimirComprovanteFechamento: (dados: DadosImpressaoFechamento) => Promise<boolean>
 }
 
 const PrinterContext = createContext<PrinterCtx | null>(null)
@@ -136,6 +140,24 @@ export function ThermalPrinterProvider({ children }: { children: ReactNode }) {
         }
     }, [impressora])
 
+    const imprimirComprovanteFechamento = useCallback(async (dados: DadosImpressaoFechamento): Promise<boolean> => {
+        if (!impressora) {
+            toast.warning('Impressora nao configurada', {
+                description: 'Fechamento registrado, mas o comprovante nao foi impresso. Conecte uma impressora no PDV.',
+            })
+            return false
+        }
+        try {
+            await imprimirFechamento(impressora, dados)
+            return true
+        } catch (err: any) {
+            toast.error('Falha ao imprimir o fechamento', {
+                description: err?.message ?? 'Verifique papel, conexao e tente novamente.',
+            })
+            return false
+        }
+    }, [impressora])
+
     return (
         <PrinterContext.Provider
             value={{
@@ -145,6 +167,7 @@ export function ThermalPrinterProvider({ children }: { children: ReactNode }) {
                 parear,
                 pearSerial,
                 imprimir,
+                imprimirComprovanteFechamento,
             }}
         >
             {children}
@@ -162,6 +185,7 @@ export function useThermalPrinter(): PrinterCtx {
             parear: async () => {},
             pearSerial: async () => {},
             imprimir: async () => false,
+            imprimirComprovanteFechamento: async () => false,
         }
     }
     return ctx

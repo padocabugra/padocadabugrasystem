@@ -15,20 +15,16 @@ export default async function PedidosPage({ searchParams }: PedidosPageProps) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) redirect('/login')
 
-    const filtroTipo = params.tipo === 'delivery' ? 'delivery' : 'todos'
-    const isDeliveryView = filtroTipo === 'delivery'
+    const isDeliveryView = params.tipo === 'delivery'
 
-    let query = supabase
+    // Estado inicial = pedidos EM ANDAMENTO (o filtro padrão do client). Histórico
+    // (entregues/cancelados) é carregado sob demanda pelo próprio client.
+    const { data: pedidos } = await supabase
         .from('pedidos')
-        .select('id, numero_mesa, comanda_id, total, status, tipo_pedido, created_at, cliente:clientes(nome), comanda:comandas(numero)')
+        .select('id, numero_mesa, comanda_id, total, status, tipo_pedido, forma_pagamento, created_at, cliente:clientes(nome), comanda:comandas!pedidos_comanda_id_fkey(numero)')
+        .in('status', ['pendente', 'preparando', 'pronto'])
         .order('created_at', { ascending: false })
-        .limit(50)
-
-    if (isDeliveryView) {
-        query = query.eq('tipo_pedido', 'delivery')
-    }
-
-    const { data: pedidos } = await query
+        .limit(100)
 
     return (
         <div className="flex flex-col gap-6">
@@ -73,10 +69,7 @@ export default async function PedidosPage({ searchParams }: PedidosPageProps) {
             </div>
 
             {/* Listagem com Real-time */}
-            <ListaPedidosClient
-                pedidosIniciais={pedidos ?? []}
-                filtroTipoInicial={filtroTipo as any}
-            />
+            <ListaPedidosClient pedidosIniciais={pedidos ?? []} />
         </div>
     )
 }

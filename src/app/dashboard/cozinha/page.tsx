@@ -30,6 +30,8 @@ export default async function CozinhaPage() {
             )
         `)
         .gte('created_at', inicioDia)
+        .eq('destino_cozinha', true)
+        .eq('retirado_cozinha', false)
         .not('status', 'in', '("entregue","cancelado")')
         .order('created_at', { ascending: false })
 

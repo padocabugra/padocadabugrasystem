@@ -9,7 +9,7 @@ import CarrinhoLateral from '@/components/pedidos/CarrinhoLateral'
 import ModalPesagem from '@/components/pedidos/ModalPesagem'
 import type { Produto } from '@/lib/types'
 import type { ItemCarrinho, TipoPedido } from '@/lib/types/pedidos'
-import { ShoppingCart as CartIcon, MapPin, Truck, UserX, CreditCard, X, User, Zap, Search, Ban, UtensilsCrossed } from 'lucide-react'
+import { ShoppingCart as CartIcon, MapPin, Truck, UserX, CreditCard, X, User, Zap, Search, Ban, UtensilsCrossed, Hash } from 'lucide-react'
 
 // Gerador local de id pra cart_item_id. crypto.randomUUID() existe em todos os
 // browsers modernos. Fallback de timestamp evita explodir em ambientes velhos.
@@ -23,6 +23,7 @@ function novoCartItemId(): string {
 interface Comanda {
     id: string
     numero: number
+    status: 'livre' | 'consumo' | 'bloqueada'
 }
 
 interface NovoPedidoClientProps {
@@ -65,17 +66,37 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
     const [selectedComandaId, setSelectedComandaId] = useState<string | null>(null)
     const [semComanda, setSemComanda] = useState(false)
     const [loadingComandas, setLoadingComandas] = useState(false)
+    const [comandaInput, setComandaInput] = useState('')
+
+    // Seleciona uma comanda pelo número digitado (livre ou em uso). Bloqueada/inexistente avisa.
+    function selecionarComandaPorNumero(v: string) {
+        const num = parseInt(v, 10)
+        if (!num || num < 1) { toast.error('Digite um número de comanda válido.'); return }
+        const c = comandasLivres.find((x) => x.numero === num)
+        if (!c) { toast.error(`Comanda ${num} indisponível (bloqueada ou inexistente).`); return }
+        setSelectedComandaId(c.id); setSemComanda(false); setComandaInput('')
+    }
+
+    // Pega a primeira comanda livre (menor número) — pra entregar um cartão novo.
+    function selecionarProximaComanda() {
+        const livre = comandasLivres.filter((c) => c.status === 'livre').sort((a, b) => a.numero - b.numero)[0]
+        if (!livre) { toast.error('Nenhuma comanda disponível. Libere uma ou adicione novas em Comandas.'); return }
+        setSelectedComandaId(livre.id); setSemComanda(false); setComandaInput('')
+    }
 
     const supabase = createClient()
 
+    // Carrega comandas livres E em consumo — permite lançar novas rodadas na MESMA
+    // comanda (a conta acumula no caixa). Bloqueadas ficam de fora.
+    // ('consumo' é o status real de comanda ocupada — gerenciado por trigger no banco.)
     const fetchComandasLivres = useCallback(async () => {
         setLoadingComandas(true)
         const { data } = await supabase
             .from('comandas')
-            .select('id, numero')
-            .eq('status', 'livre')
+            .select('id, numero, status')
+            .in('status', ['livre', 'consumo'])
             .order('numero')
-        setComandasLivres(data ?? [])
+        setComandasLivres((data ?? []) as Comanda[])
         setLoadingComandas(false)
     }, [supabase])
 
@@ -411,41 +432,91 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
                             <div className="flex items-center justify-center py-6 text-gray-400 text-sm">
                                 Carregando comandas...
                             </div>
-                        ) : (
-                            <>
-                                <div className="grid grid-cols-5 sm:grid-cols-8 gap-2 mb-3">
-                                    {comandasLivres.map((comanda) => (
+                        ) : (() => {
+                            const emUso = comandasLivres.filter((c) => c.status === 'consumo').sort((a, b) => a.numero - b.numero)
+                            const qtdLivres = comandasLivres.filter((c) => c.status === 'livre').length
+                            return (
+                                <div className="space-y-3">
+                                    {/* Digitar o número da comanda (do cartão físico) */}
+                                    <div className="flex gap-2">
+                                        <div className="relative flex-1">
+                                            <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                            <input
+                                                type="number"
+                                                inputMode="numeric"
+                                                min={1}
+                                                placeholder="Nº da comanda"
+                                                value={comandaInput}
+                                                onChange={(e) => setComandaInput(e.target.value)}
+                                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); selecionarComandaPorNumero(comandaInput) } }}
+                                                className="w-full h-12 pl-9 pr-3 rounded-xl border-2 border-blue-100 bg-white text-lg font-bold
+                                                           text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 placeholder:text-gray-300 placeholder:text-base placeholder:font-normal"
+                                            />
+                                        </div>
                                         <button
-                                            key={comanda.id}
                                             type="button"
-                                            onClick={() => { setSelectedComandaId(comanda.id); setSemComanda(false) }}
-                                            className="min-w-[60px] min-h-[60px] rounded-xl bg-emerald-50 border-2 border-emerald-300
-                                                       text-emerald-700 font-extrabold text-lg
-                                                       hover:bg-emerald-100 hover:border-emerald-400 hover:shadow-md
-                                                       active:scale-95 transition-all touch-manipulation
-                                                       flex items-center justify-center"
+                                            onClick={() => selecionarComandaPorNumero(comandaInput)}
+                                            disabled={!comandaInput}
+                                            className="px-5 h-12 rounded-xl bg-primary text-white font-bold text-sm
+                                                       hover:bg-primary/90 active:scale-95 transition-all touch-manipulation
+                                                       disabled:opacity-40 disabled:cursor-not-allowed"
                                         >
-                                            {comanda.numero}
+                                            Selecionar
                                         </button>
-                                    ))}
+                                    </div>
+
+                                    {/* Próxima comanda disponível (entregar cartão novo) */}
+                                    <button
+                                        type="button"
+                                        onClick={selecionarProximaComanda}
+                                        className="w-full h-12 rounded-xl bg-emerald-50 border-2 border-emerald-300 text-emerald-700
+                                                   font-bold text-sm flex items-center justify-center gap-2
+                                                   hover:bg-emerald-100 hover:border-emerald-400 active:scale-[0.98] transition-all touch-manipulation"
+                                    >
+                                        <Zap className="w-4 h-4" />
+                                        Próxima comanda disponível
+                                        <span className="text-xs font-semibold opacity-70">({qtdLivres} livres)</span>
+                                    </button>
+
+                                    {/* Comandas em aberto — só as em uso, pra adicionar uma rodada */}
+                                    {emUso.length > 0 && (
+                                        <div>
+                                            <p className="text-[11px] font-semibold text-amber-700/80 mb-1.5">
+                                                Em aberto — clique pra adicionar na mesma conta
+                                            </p>
+                                            <div className="flex flex-wrap gap-2">
+                                                {emUso.map((c) => (
+                                                    <button
+                                                        key={c.id}
+                                                        type="button"
+                                                        onClick={() => { setSelectedComandaId(c.id); setSemComanda(false) }}
+                                                        className="min-w-[46px] h-11 px-2.5 rounded-xl bg-amber-50 border-2 border-amber-300 text-amber-700
+                                                                   font-extrabold text-base hover:bg-amber-100 hover:border-amber-400 active:scale-95
+                                                                   transition-all touch-manipulation flex items-center justify-center"
+                                                    >
+                                                        {c.numero}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Sem comanda (balcão) */}
+                                    <button
+                                        type="button"
+                                        onClick={() => { setSemComanda(true); setSelectedComandaId(null) }}
+                                        className="w-full h-12 rounded-xl bg-slate-50 border-2 border-dashed border-slate-300
+                                                   text-slate-600 font-bold text-sm
+                                                   hover:bg-slate-100 hover:border-slate-400 hover:shadow-sm
+                                                   active:scale-[0.98] transition-all duration-200 touch-manipulation
+                                                   flex items-center justify-center gap-2"
+                                    >
+                                        <Ban className="w-4 h-4" />
+                                        Sem comanda (balcão)
+                                    </button>
                                 </div>
-                                {comandasLivres.length === 0 && (
-                                    <p className="text-xs text-gray-400 text-center mb-3">Nenhuma comanda livre no momento.</p>
-                                )}
-                                <button
-                                    type="button"
-                                    onClick={() => { setSemComanda(true); setSelectedComandaId(null) }}
-                                    className="w-full min-h-[60px] rounded-xl bg-slate-50 border-2 border-dashed border-slate-300
-                                               text-slate-600 font-bold text-sm
-                                               hover:bg-slate-100 hover:border-slate-400 hover:shadow-sm
-                                               active:scale-[0.98] transition-all duration-200 touch-manipulation
-                                               flex items-center justify-center gap-2"
-                                >
-                                    <Ban className="w-4 h-4" />
-                                    Sem comanda (balcão)
-                                </button>
-                            </>
-                        )}
+                            )
+                        })()}
                     </div>
                 )}
 

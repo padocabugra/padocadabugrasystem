@@ -64,16 +64,21 @@ export default async function CaixaPage() {
             .maybeSingle()
         : { data: null }
 
-    // Busca pedidos com status 'pronto' para o PDV consumir
+    // Busca pedidos com status 'pronto' para o PDV consumir.
+    // Inclui comanda_id/cliente_id/comanda pra agrupar pedidos da mesma mesa/comanda
+    // numa única conta já no carregamento inicial.
     const { data: pedidosProntos } = await supabase
         .from('pedidos')
         .select(`
             id,
             numero_mesa,
+            comanda_id,
+            cliente_id,
             total,
             status,
             created_at,
             cliente:clientes ( nome, cpf ),
+            comanda:comandas!pedidos_comanda_id_fkey ( numero ),
             itens_pedido (
                 id,
                 quantidade,
