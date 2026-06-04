@@ -38,6 +38,11 @@ export const NAV_ITEMS: NavItem[] = [
         roles: ['admin', 'cozinha'],
     },
     {
+        label: 'Cafeteria',
+        href: '/dashboard/cafeteria',
+        roles: ['admin', 'vendedor'],
+    },
+    {
         label: 'Clientes',
         href: '/dashboard/clientes',
         roles: ['admin', 'caixa', 'vendedor'],

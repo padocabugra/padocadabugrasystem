@@ -1,7 +1,7 @@
 'use client'
 
-import { ShoppingCart, Plus, Minus, Trash2, ChefHat, Wallet, CookingPot, DollarSign, Scale } from 'lucide-react'
-import type { ItemCarrinho } from '@/lib/types/pedidos'
+import { ShoppingCart, Plus, Minus, Trash2, ChefHat, Coffee, Wallet, CookingPot, DollarSign, Scale } from 'lucide-react'
+import type { ItemCarrinho, DestinoPedido } from '@/lib/types/pedidos'
 
 interface CarrinhoLateralProps {
     itens: ItemCarrinho[]
@@ -10,8 +10,8 @@ interface CarrinhoLateralProps {
     onRePesar: (cart_item_id: string) => void
     onSubmit: () => void
     isSubmitting: boolean
-    destinoCozinha: boolean
-    onDestinoChange: (cozinha: boolean) => void
+    destino: DestinoPedido
+    onDestinoChange: (destino: DestinoPedido) => void
 }
 
 const formatBRL = (value: number) =>
@@ -32,7 +32,7 @@ export default function CarrinhoLateral({
     onRePesar,
     onSubmit,
     isSubmitting,
-    destinoCozinha,
+    destino,
     onDestinoChange,
 }: CarrinhoLateralProps) {
     const total = itens.reduce((acc, item) => acc + item.preco * item.quantidade, 0)
@@ -148,14 +148,14 @@ export default function CarrinhoLateral({
                     <p className="text-xl font-extrabold text-primary">{formatBRL(total)}</p>
                 </div>
 
-                {/* Destino do pedido — segmented control */}
-                <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Destino do pedido">
+                {/* Destino do pedido — segmented control (Cozinha / Cafeteria / Caixa) */}
+                <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Destino do pedido">
                     <button
                         type="button"
                         role="radio"
-                        aria-checked={destinoCozinha}
-                        onClick={() => onDestinoChange(true)}
-                        className={`min-h-[48px] rounded-xl font-bold text-sm border-2 transition-all flex items-center justify-center gap-2 touch-manipulation active:scale-95 ${destinoCozinha
+                        aria-checked={destino === 'cozinha'}
+                        onClick={() => onDestinoChange('cozinha')}
+                        className={`min-h-[48px] rounded-xl font-bold text-xs border-2 transition-all flex flex-col items-center justify-center gap-1 touch-manipulation active:scale-95 ${destino === 'cozinha'
                             ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-200'
                             : 'bg-white border-gray-200 text-gray-600 hover:border-blue-300'
                             }`}
@@ -166,15 +166,28 @@ export default function CarrinhoLateral({
                     <button
                         type="button"
                         role="radio"
-                        aria-checked={!destinoCozinha}
-                        onClick={() => onDestinoChange(false)}
-                        className={`min-h-[48px] rounded-xl font-bold text-sm border-2 transition-all flex items-center justify-center gap-2 touch-manipulation active:scale-95 ${!destinoCozinha
+                        aria-checked={destino === 'cafeteria'}
+                        onClick={() => onDestinoChange('cafeteria')}
+                        className={`min-h-[48px] rounded-xl font-bold text-xs border-2 transition-all flex flex-col items-center justify-center gap-1 touch-manipulation active:scale-95 ${destino === 'cafeteria'
+                            ? 'bg-amber-600 border-amber-600 text-white shadow-lg shadow-amber-200'
+                            : 'bg-white border-gray-200 text-gray-600 hover:border-amber-300'
+                            }`}
+                    >
+                        <Coffee className="w-4 h-4" />
+                        Cafeteria
+                    </button>
+                    <button
+                        type="button"
+                        role="radio"
+                        aria-checked={destino === 'caixa'}
+                        onClick={() => onDestinoChange('caixa')}
+                        className={`min-h-[48px] rounded-xl font-bold text-xs border-2 transition-all flex flex-col items-center justify-center gap-1 touch-manipulation active:scale-95 ${destino === 'caixa'
                             ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-200'
                             : 'bg-white border-gray-200 text-gray-600 hover:border-emerald-300'
                             }`}
                     >
                         <Wallet className="w-4 h-4" />
-                        Direto p/ Caixa
+                        Caixa
                     </button>
                 </div>
 
@@ -184,19 +197,25 @@ export default function CarrinhoLateral({
                     className={`w-full h-14 rounded-2xl text-white font-bold text-base
                                flex items-center justify-center gap-3 active:scale-95 transition-all
                                disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation
-                               shadow-lg ${destinoCozinha
+                               shadow-lg ${destino === 'cozinha'
                             ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/30'
-                            : 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/30'
+                            : destino === 'cafeteria'
+                                ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-500/30'
+                                : 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/30'
                         }`}
                 >
-                    {destinoCozinha
-                        ? <CookingPot className="w-5 h-5" />
-                        : <DollarSign className="w-5 h-5" />}
+                    {destino === 'caixa'
+                        ? <DollarSign className="w-5 h-5" />
+                        : destino === 'cafeteria'
+                            ? <Coffee className="w-5 h-5" />
+                            : <CookingPot className="w-5 h-5" />}
                     {isSubmitting
                         ? 'Enviando...'
-                        : destinoCozinha
+                        : destino === 'cozinha'
                             ? 'Enviar pra Cozinha'
-                            : 'Enviar Direto p/ Caixa'}
+                            : destino === 'cafeteria'
+                                ? 'Enviar pra Cafeteria'
+                                : 'Enviar Direto p/ Caixa'}
                 </button>
             </div>
         </div>

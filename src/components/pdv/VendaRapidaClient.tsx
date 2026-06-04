@@ -6,13 +6,14 @@ import { toast } from 'sonner'
 import {
     Search, Plus, Minus, Trash2, ShoppingCart, Package,
     Banknote, Smartphone, CreditCard, X, Zap, Lock, CheckCircle2,
-    Receipt, AlertTriangle, RefreshCw, Printer, Scale,
+    Receipt, AlertTriangle, RefreshCw, Printer, Scale, Copy,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency, unformatCPF, isValidCPF } from '@/lib/formatters'
 import type { Produto } from '@/lib/types'
 import CpfNotaInput from '@/components/shared/CpfNotaInput'
 import { QRCodeSVG } from 'qrcode.react'
+import { gerarPixCopiaECola, PIX_RECEBEDOR } from '@/lib/pix'
 import DanfeNFCePrint from '@/components/caixa/DanfeNFCePrint'
 import { dataHoraLocalVisual, getAgoraUTC } from '@/lib/timezone'
 import { useThermalPrinter } from '@/components/shared/ThermalPrinterContext'
@@ -752,17 +753,42 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                             <p className="text-emerald-100 text-sm mt-1">Aguardando pagamento do cliente</p>
                         </div>
                         <div className="p-6 flex flex-col items-center">
-                            <div className="bg-white p-3 rounded-xl border-2 border-emerald-100 shadow-sm mb-4 inline-block">
-                                <QRCodeSVG
-                                    value={`00020126580014br.gov.bcb.pix0136${vendedorId}520400005303986540${total.toFixed(2).length < 10 ? '0' : ''}${total.toFixed(2).length}${total.toFixed(2)}5802BR5915Padoca CRM6008BRASILIA62070503***6304`}
-                                    size={180}
-                                    level="M"
-                                    includeMargin={false}
-                                />
-                            </div>
-                            <p className="text-sm text-gray-500 mb-1">Total a Pagar</p>
-                            <p className="text-3xl font-black text-gray-900 mb-6">{formatCurrency(total)}</p>
-                            
+                            {(() => {
+                                const pixPayload = gerarPixCopiaECola({ valor: total })
+                                return (
+                                    <>
+                                        <div className="bg-white p-3 rounded-xl border-2 border-emerald-100 shadow-sm mb-4 inline-block">
+                                            <QRCodeSVG
+                                                value={pixPayload}
+                                                size={180}
+                                                level="M"
+                                                includeMargin={false}
+                                            />
+                                        </div>
+                                        <p className="text-sm text-gray-500 mb-1">Total a Pagar</p>
+                                        <p className="text-3xl font-black text-gray-900 mb-1">{formatCurrency(total)}</p>
+                                        <p className="text-xs text-gray-400 mb-4">{PIX_RECEBEDOR.nome}</p>
+
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                try {
+                                                    await navigator.clipboard.writeText(pixPayload)
+                                                    toast.success('Código PIX copiado!')
+                                                } catch {
+                                                    toast.error('Não foi possível copiar o código.')
+                                                }
+                                            }}
+                                            className="w-full mb-3 py-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700
+                                                       rounded-xl font-bold text-xs transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                                        >
+                                            <Copy className="w-4 h-4" />
+                                            Copiar código (Pix Copia e Cola)
+                                        </button>
+                                    </>
+                                )
+                            })()}
+
                             <div className="flex w-full gap-3">
                                 <button
                                     onClick={() => setModalPix(false)}

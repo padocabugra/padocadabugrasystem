@@ -7,13 +7,14 @@ import { toast } from 'sonner'
 import {
     Search, Receipt, Banknote, CreditCard, Smartphone, ArrowDownCircle,
     ArrowUpCircle, ChevronRight, RefreshCw, CheckCircle2, X,
-    DollarSign, Clock, AlertTriangle, Hash, User, Star, Printer, Lock
+    DollarSign, Clock, AlertTriangle, Hash, User, Star, Printer, Lock, Copy
 } from 'lucide-react'
 import { dataHoraLocalVisual, getAgoraUTC } from '@/lib/timezone'
 import { unformatCPF, isValidCPF } from '@/lib/formatters'
 import CpfNotaInput from '@/components/shared/CpfNotaInput'
 import { registrarAuditLog } from '@/lib/audit-log'
 import { QRCodeSVG } from 'qrcode.react'
+import { gerarPixCopiaECola, PIX_RECEBEDOR } from '@/lib/pix'
 import DanfeNFCePrint from '@/components/caixa/DanfeNFCePrint'
 import { useThermalPrinter } from '@/components/shared/ThermalPrinterContext'
 
@@ -1369,17 +1370,45 @@ export default function CaixaClient({
                             <p className="text-emerald-100 text-sm mt-1">Aguardando pagamento do cliente</p>
                         </div>
                         <div className="p-6 flex flex-col items-center">
-                            <div className="bg-white p-3 rounded-xl border-2 border-emerald-100 shadow-sm mb-4 inline-block">
-                                <QRCodeSVG
-                                    value={`00020126580014br.gov.bcb.pix0136${usuarioId}520400005303986540${contaSelecionada.total.toFixed(2).length < 10 ? '0' : ''}${contaSelecionada.total.toFixed(2).length}${contaSelecionada.total.toFixed(2)}5802BR5915Padoca CRM6008BRASILIA62070503***6304`}
-                                    size={180}
-                                    level="M"
-                                    includeMargin={false}
-                                />
-                            </div>
-                            <p className="text-sm text-gray-500 mb-1">Total a Pagar</p>
-                            <p className="text-3xl font-black text-gray-900 mb-6">{formatCurrency(contaSelecionada.total)}</p>
-                            
+                            {(() => {
+                                const pixPayload = gerarPixCopiaECola({
+                                    valor: contaSelecionada.total,
+                                    txid: contaSelecionada.pedidos[0]?.id?.replace(/-/g, '').slice(0, 25),
+                                })
+                                return (
+                                    <>
+                                        <div className="bg-white p-3 rounded-xl border-2 border-emerald-100 shadow-sm mb-4 inline-block">
+                                            <QRCodeSVG
+                                                value={pixPayload}
+                                                size={180}
+                                                level="M"
+                                                includeMargin={false}
+                                            />
+                                        </div>
+                                        <p className="text-sm text-gray-500 mb-1">Total a Pagar</p>
+                                        <p className="text-3xl font-black text-gray-900 mb-1">{formatCurrency(contaSelecionada.total)}</p>
+                                        <p className="text-xs text-gray-400 mb-4">{PIX_RECEBEDOR.nome}</p>
+
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                try {
+                                                    await navigator.clipboard.writeText(pixPayload)
+                                                    toast.success('Código PIX copiado!')
+                                                } catch {
+                                                    toast.error('Não foi possível copiar o código.')
+                                                }
+                                            }}
+                                            className="w-full mb-3 py-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700
+                                                       rounded-xl font-bold text-xs transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                                        >
+                                            <Copy className="w-4 h-4" />
+                                            Copiar código (Pix Copia e Cola)
+                                        </button>
+                                    </>
+                                )
+                            })()}
+
                             <div className="flex w-full gap-3">
                                 <button
                                     onClick={() => setModalPix(false)}

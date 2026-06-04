@@ -64,7 +64,10 @@ export async function middleware(request: NextRequest) {
             }
 
             // Regras por papel
-            if (role === 'vendedor' && !pathname.startsWith('/dashboard/pedidos')) {
+            // Vendedor (inclui o barista): Pedidos + Painel da Cafeteria
+            if (role === 'vendedor'
+                && !pathname.startsWith('/dashboard/pedidos')
+                && !pathname.startsWith('/dashboard/cafeteria')) {
                 return NextResponse.redirect(new URL('/selecionar-ambiente', request.url))
             }
 

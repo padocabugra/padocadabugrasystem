@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
-import { LayoutDashboard, ShoppingCart, ShoppingBag, ChefHat, Store } from 'lucide-react'
+import { LayoutDashboard, ShoppingCart, ShoppingBag, ChefHat, Coffee, Store } from 'lucide-react'
 import type { UserRole } from '@/lib/types'
 
 // Configuração dos Ambientes
@@ -33,6 +33,13 @@ const ENVIRONMENTS = [
         roles: ['admin', 'cozinha'],
         icon: ChefHat,
         description: 'Produção'
+    },
+    {
+        label: 'Painel Cafeteria',
+        path: '/dashboard/cafeteria',
+        roles: ['admin', 'vendedor'],
+        icon: Coffee,
+        description: 'Café & bebidas'
     },
 ]
 

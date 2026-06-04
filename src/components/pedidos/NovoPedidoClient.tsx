@@ -8,7 +8,7 @@ import CatalogoProdutos from '@/components/pedidos/CatalogoProdutos'
 import CarrinhoLateral from '@/components/pedidos/CarrinhoLateral'
 import ModalPesagem from '@/components/pedidos/ModalPesagem'
 import type { Produto } from '@/lib/types'
-import type { ItemCarrinho, TipoPedido } from '@/lib/types/pedidos'
+import type { ItemCarrinho, TipoPedido, DestinoPedido } from '@/lib/types/pedidos'
 import { ShoppingCart as CartIcon, MapPin, Truck, UserX, CreditCard, X, User, Zap, Search, Ban, UtensilsCrossed, Hash } from 'lucide-react'
 
 // Gerador local de id pra cart_item_id. crypto.randomUUID() existe em todos os
@@ -48,7 +48,7 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
     const [tipoPedido, setTipoPedido] = useState<TipoPedido>(tipoInicial)
     const [numeroMesa, setNumeroMesa] = useState<string>('')
     const [carrinho, setCarrinho] = useState<ItemCarrinho[]>([])
-    const [destinoCozinha, setDestinoCozinha] = useState(true)
+    const [destino, setDestino] = useState<DestinoPedido>('cozinha')
     const [isSubmitting, setIsSubmitting] = useState(false)
 
     // ── Pesagem ──
@@ -242,7 +242,8 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
             p_total: total,
             p_tipo_pedido: tipoPedido,
             p_comanda_id: selectedComandaId,
-            p_destino_cozinha: destinoCozinha,
+            p_destino_cozinha: destino === 'cozinha',
+            p_destino_cafeteria: destino === 'cafeteria',
             p_itens: carrinho.map((i) => ({
                 produto_id: i.produto_id,
                 quantidade: i.quantidade,
@@ -258,7 +259,10 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
         }
 
         const tipoLabel = tipoPedido === 'delivery' ? '🛵 Delivery' : '🍞 Local'
-        const destinoLabel = destinoCozinha ? 'enviado para a cozinha' : 'enviado direto para o caixa'
+        const destinoLabel =
+            destino === 'cozinha' ? 'enviado para a cozinha'
+                : destino === 'cafeteria' ? 'enviado para a cafeteria'
+                    : 'enviado direto para o caixa'
         toast.success(`Pedido ${tipoLabel} ${destinoLabel}!`, {
             description: `Pedido #${(data as any)?.pedido_id?.slice(0, 8).toUpperCase()} criado com sucesso.`,
         })
@@ -270,7 +274,7 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
         setSelectedComandaId(null)
         setSemComanda(false)
         setCarrinho([])
-        setDestinoCozinha(true)
+        setDestino('cozinha')
         setProdutoParaPesar(null)
         setCartItemEmReweigh(null)
         fetchComandasLivres()
@@ -571,8 +575,8 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
                     onRePesar={handleRePesar}
                     onSubmit={handleSubmit}
                     isSubmitting={isSubmitting}
-                    destinoCozinha={destinoCozinha}
-                    onDestinoChange={setDestinoCozinha}
+                    destino={destino}
+                    onDestinoChange={setDestino}
                 />
                 {/* ── Modal de Pesagem ── */}
                 {produtoParaPesar && (

@@ -4,10 +4,15 @@ import { z } from 'zod'
 export const STATUS_PEDIDO = ['pendente', 'preparando', 'pronto', 'entregue', 'cancelado'] as const
 export const FORMA_PAGAMENTO = ['dinheiro', 'pix', 'debito', 'credito'] as const
 export const TIPO_PEDIDO = ['local', 'delivery'] as const
+// Destino de produção do pedido (para onde a comanda é roteada ao ser enviada).
+// 'cozinha' e 'cafeteria' entram em filas de produção (status 'pendente');
+// 'caixa' = venda direta, já nasce 'pronto'. São mutuamente exclusivos.
+export const DESTINO_PEDIDO = ['cozinha', 'cafeteria', 'caixa'] as const
 
 export type StatusPedido = (typeof STATUS_PEDIDO)[number]
 export type FormaPagamento = (typeof FORMA_PAGAMENTO)[number]
 export type TipoPedido = (typeof TIPO_PEDIDO)[number]
+export type DestinoPedido = (typeof DESTINO_PEDIDO)[number]
 
 // Interface alinhada com o schema real da tabela itens_pedido
 export interface ItemPedido {
