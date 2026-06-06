@@ -7,6 +7,7 @@ import {
     UserCog, Plus, X, Loader2, Save, Search,
     Shield, ShoppingCart, ChefHat, ShoppingBag,
     ToggleLeft, ToggleRight, Mail, User, KeyRound,
+    Lock, Eye, EyeOff,
 } from 'lucide-react'
 import type { UserRole } from '@/lib/types'
 import { registrarAuditLog } from '@/lib/audit-log'
@@ -159,12 +160,136 @@ function ModalAdicionarUsuario({
     )
 }
 
+// ── Modal Senha de Exclusão (admin) ───────────────────────────────────────────
+//
+// Senha que o ADM exige para autorizar cancelamento/exclusão de pedido no
+// ambiente do garçom/vendedor. O admin pode criar/alterar e visualizar (fica
+// oculta ao abrir — revela no olho). Persistida via RPC SECURITY DEFINER.
+function ModalSenhaExclusao({ onClose }: { onClose: () => void }) {
+    const supabase = createClient()
+    const [carregando, setCarregando] = useState(true)
+    const [senha, setSenha] = useState('')
+    const [revelar, setRevelar] = useState(false)
+    const [jaConfigurada, setJaConfigurada] = useState(false)
+    const [salvando, setSalvando] = useState(false)
+
+    useEffect(() => {
+        let ativo = true
+        ;(async () => {
+            const { data, error } = await supabase.rpc('fn_get_senha_exclusao')
+            if (!ativo) return
+            if (error) {
+                toast.error('Erro ao carregar a senha de exclusão', { description: error.message })
+            } else if (data) {
+                setSenha(data as string)
+                setJaConfigurada(true)
+            }
+            setCarregando(false)
+        })()
+        return () => { ativo = false }
+    }, [supabase])
+
+    async function handleSalvar() {
+        if (senha.trim().length < 4) {
+            toast.error('A senha deve ter pelo menos 4 caracteres.')
+            return
+        }
+        setSalvando(true)
+        try {
+            const { error } = await supabase.rpc('fn_set_senha_exclusao', { p_senha: senha.trim() })
+            if (error) throw error
+
+            registrarAuditLog({
+                acao: jaConfigurada ? 'config.senha_exclusao.alterar' as any : 'config.senha_exclusao.criar' as any,
+                entidade: 'configuracoes_sistema',
+                detalhes: { chave: 'senha_exclusao' },
+            })
+
+            toast.success(jaConfigurada ? 'Senha de exclusão atualizada!' : 'Senha de exclusão criada!')
+            onClose()
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'Erro ao salvar a senha'
+            toast.error(msg)
+        } finally {
+            setSalvando(false)
+        }
+    }
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                    <h2 className="text-lg font-extrabold text-gray-800 flex items-center gap-2">
+                        <Lock className="w-5 h-5 text-blue-600" />
+                        Senha de Exclusão (admin)
+                    </h2>
+                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
+                        <X className="w-4 h-4 text-gray-500" />
+                    </button>
+                </div>
+                <div className="p-6 space-y-4">
+                    <p className="text-sm text-gray-500">
+                        Senha exigida para autorizar o cancelamento/exclusão de pedidos feitos pelo garçom/vendedor.
+                        Compartilhe apenas com responsáveis.
+                    </p>
+
+                    {carregando ? (
+                        <div className="flex items-center justify-center py-8 text-gray-400">
+                            <Loader2 className="w-6 h-6 animate-spin" />
+                        </div>
+                    ) : (
+                        <>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">
+                                    {jaConfigurada ? 'Senha atual / nova senha' : 'Criar senha'}
+                                </label>
+                                <div className="relative">
+                                    <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                    <input
+                                        type={revelar ? 'text' : 'password'}
+                                        value={senha}
+                                        onChange={(e) => setSenha(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && handleSalvar()}
+                                        placeholder="Mínimo 4 caracteres"
+                                        autoComplete="new-password"
+                                        className="w-full pl-10 pr-11 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-200 outline-none"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setRevelar((v) => !v)}
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-gray-600 rounded-lg"
+                                        title={revelar ? 'Ocultar' : 'Mostrar'}
+                                    >
+                                        {revelar ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                    </button>
+                                </div>
+                            </div>
+                            {jaConfigurada && (
+                                <p className="text-xs text-emerald-600 font-medium flex items-center gap-1.5">
+                                    <Shield className="w-3.5 h-3.5" /> Já existe uma senha configurada.
+                                </p>
+                            )}
+                        </>
+                    )}
+                </div>
+                <div className="px-6 py-4 border-t border-gray-100 flex gap-3 justify-end">
+                    <button onClick={onClose} className="px-5 py-2 text-gray-600 hover:bg-gray-100 rounded-xl text-sm font-semibold transition-colors">Cancelar</button>
+                    <button onClick={handleSalvar} disabled={salvando || carregando} className="flex items-center gap-2 px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold transition-all disabled:opacity-60">
+                        {salvando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} {salvando ? 'Salvando...' : 'Salvar Senha'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    )
+}
+
 // ── Componente Principal ─────────────────────────────────────────────────────
 
 export default function UsuariosClient() {
     const [usuarios, setUsuarios] = useState<UsuarioRow[]>([])
     const [loading, setLoading] = useState(true)
     const [modalOpen, setModalOpen] = useState(false)
+    const [senhaModalOpen, setSenhaModalOpen] = useState(false)
     const [busca, setBusca] = useState('')
     const [pagina, setPagina] = useState(1)
     const supabase = createClient()
@@ -227,9 +352,14 @@ export default function UsuariosClient() {
                     </h1>
                     <p className="text-sm text-gray-500 mt-0.5">Gerencie os funcionários e seus níveis de acesso.</p>
                 </div>
-                <button onClick={() => setModalOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold transition-all shadow-sm active:scale-[0.98]">
-                    <Plus className="w-4 h-4" /> Novo Funcionário
-                </button>
+                <div className="flex items-center gap-2">
+                    <button onClick={() => setSenhaModalOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-[0.98]">
+                        <Lock className="w-4 h-4 text-blue-600" /> Senha de Exclusão
+                    </button>
+                    <button onClick={() => setModalOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold transition-all shadow-sm active:scale-[0.98]">
+                        <Plus className="w-4 h-4" /> Novo Funcionário
+                    </button>
+                </div>
             </div>
             <div className="relative max-w-sm">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -283,6 +413,7 @@ export default function UsuariosClient() {
                 </div>
             )}
             {modalOpen && <ModalAdicionarUsuario onClose={() => setModalOpen(false)} onSuccess={fetchUsuarios} />}
+            {senhaModalOpen && <ModalSenhaExclusao onClose={() => setSenhaModalOpen(false)} />}
         </div>
     )
 }

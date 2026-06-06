@@ -36,7 +36,7 @@ export async function POST(req: Request) {
 
         // ── Validação de payload ─────────────────────────────────────
         const body = await req.json()
-        const { pedidoId, itens, total, formaPagamento, cpfCliente } = body ?? {}
+        const { pedidoId, pedidoIds, itens, total, formaPagamento, cpfCliente } = body ?? {}
 
         if (!Array.isArray(itens) || itens.length === 0 || !total || !formaPagamento) {
             return NextResponse.json(
@@ -68,15 +68,21 @@ export async function POST(req: Request) {
             identificadorInterno: pedidoId && typeof pedidoId === 'string' ? pedidoId : undefined,
         })
 
-        // ── Atualiza pedido com status fiscal ────────────────────────
-        if (pedidoId && typeof pedidoId === 'string') {
+        // ── Atualiza pedido(s) com status fiscal ─────────────────────
+        // Uma conta pode reunir vários pedidos sob UMA NFC-e (1 cupom por
+        // cliente). Grava a mesma chave em todos os pedidos da conta.
+        const ids: string[] = Array.isArray(pedidoIds)
+            ? pedidoIds.filter((x: unknown): x is string => typeof x === 'string' && x.length > 0)
+            : (pedidoId && typeof pedidoId === 'string' ? [pedidoId] : [])
+
+        if (ids.length > 0) {
             await supabase
                 .from('pedidos')
                 .update({
                     chave_nfce: resultado.ok ? resultado.chaveAcesso : null,
                     nfce_status: resultado.ok ? 'emitida' : 'erro',
                 })
-                .eq('id', pedidoId)
+                .in('id', ids)
         }
 
         return NextResponse.json(resultado)

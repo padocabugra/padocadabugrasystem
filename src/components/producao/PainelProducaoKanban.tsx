@@ -22,6 +22,8 @@ interface ItemPedidoProducao {
 export interface PedidoProducao {
     id: string
     numero_mesa: number | null
+    /** Número da comanda (ficha do cliente), quando o pedido está vinculado a uma. */
+    comanda_numero?: number | null
     total: number
     status: 'pendente' | 'preparando' | 'pronto'
     tipo_pedido?: 'local' | 'delivery'
@@ -374,7 +376,8 @@ function ModalQuickAdd({
     const [busca, setBusca] = useState('')
     const [produtoSel, setProdutoSel] = useState<ProdutoQuickAdd | null>(null)
     const [qtd, setQtd] = useState(1)
-    const [identificador, setIdentificador] = useState('')
+    const [comandaInput, setComandaInput] = useState('')
+    const [mesaInput, setMesaInput] = useState('')
     const [enviando, setEnviando] = useState(false)
 
     const formatBRL = (v: number) =>
@@ -390,22 +393,49 @@ function ModalQuickAdd({
             toast.error('Selecione um produto.')
             return
         }
-        const numeroMesa = identificador.trim() ? parseInt(identificador.trim(), 10) : null
-        if (identificador.trim() && (!numeroMesa || numeroMesa < 1)) {
-            toast.error('Número da comanda/mesa inválido.')
+        const comandaNum = comandaInput.trim() ? parseInt(comandaInput.trim(), 10) : null
+        if (comandaInput.trim() && (!comandaNum || comandaNum < 1)) {
+            toast.error('Número de comanda inválido.')
             return
         }
+        const numeroMesa = mesaInput.trim() ? parseInt(mesaInput.trim(), 10) : null
+        if (mesaInput.trim() && (!numeroMesa || numeroMesa < 1)) {
+            toast.error('Número de mesa inválido.')
+            return
+        }
+
+        setEnviando(true)
+
+        // Resolve a comanda digitada (livre ou em consumo) -> id, pra VINCULAR o
+        // item à ficha. Sem isso o pedido fica solto (era a causa do café "virar Balcão").
+        let comandaId: string | null = null
+        let comandaNumeroResolvida: number | null = null
+        if (comandaNum != null) {
+            const { data: cmd } = await supabase
+                .from('comandas')
+                .select('id, numero')
+                .eq('numero', comandaNum)
+                .in('status', ['livre', 'consumo'])
+                .maybeSingle()
+            if (!cmd) {
+                setEnviando(false)
+                toast.error(`Comanda ${comandaNum} indisponível (bloqueada ou inexistente).`)
+                return
+            }
+            comandaId = cmd.id
+            comandaNumeroResolvida = cmd.numero
+        }
+
         const quantidade = Math.max(1, qtd)
         const total = produtoSel.preco * quantidade
 
-        setEnviando(true)
         const { data, error } = await supabase.rpc('create_pedido_completo', {
             p_cliente_id: null,
             p_numero_mesa: numeroMesa,
             p_vendedor_id: vendedorId,
             p_total: total,
             p_tipo_pedido: 'local',
-            p_comanda_id: null,
+            p_comanda_id: comandaId,
             p_destino_cozinha: false,
             p_destino_cafeteria: true,
             p_itens: [
@@ -429,6 +459,7 @@ function ModalQuickAdd({
             onCriado({
                 id: pedidoId,
                 numero_mesa: numeroMesa,
+                comanda_numero: comandaNumeroResolvida,
                 total,
                 status: 'pendente',
                 tipo_pedido: 'local',
@@ -436,9 +467,10 @@ function ModalQuickAdd({
                 itens: [{ quantidade, produto_nome: produtoSel.nome, produto_id: produtoSel.id }],
             })
         }
-        toast.success(
-            `${quantidade}× ${produtoSel.nome} — ${numeroMesa ? `Mesa/Comanda ${numeroMesa}` : 'Balcão'}`
-        )
+        const destinoLabel = comandaNumeroResolvida != null
+            ? `Comanda ${comandaNumeroResolvida}`
+            : numeroMesa != null ? `Mesa ${numeroMesa}` : 'Balcão'
+        toast.success(`${quantidade}× ${produtoSel.nome} — ${destinoLabel}`)
         onClose()
     }
 
@@ -464,10 +496,33 @@ function ModalQuickAdd({
 
                 {/* Body */}
                 <div className="p-5 space-y-4 overflow-y-auto">
-                    {/* Identificador (comanda/mesa/pessoa) */}
+                    {/* Comanda (ficha do cliente) — vincula o item à conta da comanda */}
                     <div>
                         <label className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5 block">
-                            Comanda / Mesa / Pessoa
+                            Comanda
+                        </label>
+                        <div className="relative">
+                            <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                            <input
+                                type="number"
+                                inputMode="numeric"
+                                min={1}
+                                placeholder="Nº da comanda (opcional)"
+                                value={comandaInput}
+                                onChange={(e) => setComandaInput(e.target.value)}
+                                className="w-full h-12 pl-9 pr-3 rounded-xl border-2 border-amber-100 bg-white text-lg font-bold
+                                           text-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-300 placeholder:text-gray-300 placeholder:text-sm placeholder:font-normal"
+                            />
+                        </div>
+                        <p className="text-[11px] text-gray-400 mt-1">
+                            Soma o item na ficha da comanda — vai pra mesma conta no caixa.
+                        </p>
+                    </div>
+
+                    {/* Mesa / Pessoa (opcional) — usado quando não há comanda */}
+                    <div>
+                        <label className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5 block">
+                            Mesa / Pessoa
                         </label>
                         <div className="relative">
                             <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -476,8 +531,8 @@ function ModalQuickAdd({
                                 inputMode="numeric"
                                 min={1}
                                 placeholder="Nº (opcional — vazio = Balcão)"
-                                value={identificador}
-                                onChange={(e) => setIdentificador(e.target.value)}
+                                value={mesaInput}
+                                onChange={(e) => setMesaInput(e.target.value)}
                                 className="w-full h-12 pl-9 pr-3 rounded-xl border-2 border-amber-100 bg-white text-lg font-bold
                                            text-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-300 placeholder:text-gray-300 placeholder:text-sm placeholder:font-normal"
                             />
@@ -623,10 +678,18 @@ function PedidoCard({
                         active:scale-[0.99] transition-transform
                         ${pedido.tipo_pedido === 'delivery' ? 'border-blue-200 ring-2 ring-blue-100' : 'border-gray-100'}`}>
             <div className={`px-4 py-3 flex items-center justify-between ${cfg.cardHeader[pedido.status]}`}>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-2xl font-extrabold text-gray-800">
-                        {pedido.numero_mesa ? `Mesa ${pedido.numero_mesa}` : 'Balcão'}
+                        {pedido.comanda_numero != null
+                            ? `Comanda ${pedido.comanda_numero}`
+                            : pedido.numero_mesa != null ? `Mesa ${pedido.numero_mesa}` : 'Balcão'}
                     </span>
+                    {/* Quando há comanda E mesa, mostra a mesa como complemento */}
+                    {pedido.comanda_numero != null && pedido.numero_mesa != null && (
+                        <span className="px-2 py-0.5 bg-white/70 border border-gray-200 text-gray-600 rounded-full text-[10px] font-bold uppercase tracking-wider">
+                            Mesa {pedido.numero_mesa}
+                        </span>
+                    )}
                     {(pedido.tipo_pedido === 'delivery') && (
                         <span className="flex items-center gap-1 px-2 py-0.5 bg-blue-600 text-white rounded-full text-[10px] font-black uppercase tracking-wider">
                             <Truck className="w-3 h-3" />
@@ -910,9 +973,21 @@ export default function PainelProducaoKanban({ pedidosIniciais, variante, quickA
                         produto_id: i.produto_id,
                     }))
 
+                    // Número da comanda (ficha) — payload do realtime traz só o id.
+                    let comandaNumero: number | null = null
+                    if (novo.comanda_id) {
+                        const { data: cmd } = await supabase
+                            .from('comandas')
+                            .select('numero')
+                            .eq('id', novo.comanda_id)
+                            .maybeSingle()
+                        comandaNumero = cmd?.numero ?? null
+                    }
+
                     const pedidoNovo: PedidoProducao = {
                         id: novo.id,
                         numero_mesa: novo.numero_mesa,
+                        comanda_numero: comandaNumero,
                         total: novo.total,
                         status: novo.status,
                         tipo_pedido: novo.tipo_pedido || 'local',

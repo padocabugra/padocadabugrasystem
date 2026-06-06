@@ -23,6 +23,7 @@ export default async function CozinhaPage() {
             status,
             tipo_pedido,
             created_at,
+            comanda:comandas!pedidos_comanda_id_fkey ( numero ),
             itens_pedido (
                 quantidade,
                 produto_id,
@@ -39,6 +40,7 @@ export default async function CozinhaPage() {
     const pedidos: PedidoCozinha[] = (pedidosRaw ?? []).map((p: any) => ({
         id: p.id,
         numero_mesa: p.numero_mesa,
+        comanda_numero: Array.isArray(p.comanda) ? (p.comanda[0]?.numero ?? null) : (p.comanda?.numero ?? null),
         total: p.total,
         status: p.status,
         tipo_pedido: p.tipo_pedido || 'local',

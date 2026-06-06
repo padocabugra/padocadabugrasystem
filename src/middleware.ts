@@ -1,5 +1,21 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { NAV_ITEMS } from '@/lib/types'
+
+// A guarda de rota espelha EXATAMENTE o menu (NAV_ITEMS): se o cargo vê o item
+// no menu, pode acessar a rota (e suas sub-rotas) por URL; senão é barrado.
+// Assim menu e acesso nunca divergem — fonte única de verdade.
+// '/dashboard' (raiz) exige match exato; os demais aceitam a rota + sub-rotas.
+// Páginas administrativas fora do NAV (relatórios, mobiliário, comandas,
+// usuários) não casam com nenhum item de não-admin => ficam restritas ao admin.
+function rotaPermitidaParaCargo(pathname: string, role: string | undefined): boolean {
+    if (!role) return false
+    return NAV_ITEMS.some((item) => {
+        if (!(item.roles as string[]).includes(role)) return false
+        if (item.href === '/dashboard') return pathname === '/dashboard'
+        return pathname === item.href || pathname.startsWith(item.href + '/')
+    })
+}
 
 export async function middleware(request: NextRequest) {
     let supabaseResponse = NextResponse.next({ request })
@@ -46,7 +62,7 @@ export async function middleware(request: NextRequest) {
         return NextResponse.redirect(url)
     }
 
-    // RBAC: Controle de Acesso Baseado em Função
+    // RBAC: Controle de Acesso Baseado em Função (espelha o menu — ver helper acima)
     if (pathname.startsWith('/dashboard') && user) {
         const { data: usuario } = await supabase
             .from('usuarios')
@@ -56,29 +72,9 @@ export async function middleware(request: NextRequest) {
 
         const role = usuario?.role
 
-        // Se não for admin, aplica restrições estritas
-        if (role !== 'admin') {
-            // Ninguém além de admin acessa a raiz /dashboard (Painel Admin)
-            if (pathname === '/dashboard') {
-                return NextResponse.redirect(new URL('/selecionar-ambiente', request.url))
-            }
-
-            // Regras por papel
-            // Vendedor (inclui o barista): Pedidos + Painel da Cafeteria
-            if (role === 'vendedor'
-                && !pathname.startsWith('/dashboard/pedidos')
-                && !pathname.startsWith('/dashboard/cafeteria')) {
-                return NextResponse.redirect(new URL('/selecionar-ambiente', request.url))
-            }
-
-            const isCaixaPath = pathname.startsWith('/dashboard/pdv') || pathname.startsWith('/dashboard/caixa')
-            if (role === 'caixa' && !isCaixaPath) {
-                return NextResponse.redirect(new URL('/selecionar-ambiente', request.url))
-            }
-
-            if (role === 'cozinha' && !pathname.startsWith('/dashboard/cozinha')) {
-                return NextResponse.redirect(new URL('/selecionar-ambiente', request.url))
-            }
+        // Admin acessa tudo. Demais cargos: só as rotas dos seus itens de menu.
+        if (role !== 'admin' && !rotaPermitidaParaCargo(pathname, role)) {
+            return NextResponse.redirect(new URL('/selecionar-ambiente', request.url))
         }
     }
 

@@ -138,10 +138,14 @@ interface NfceInfo {
     erro?: string
 }
 
-// Cada pedido da conta carrega sua própria nota fiscal (NFC-e segue por pedido,
-// inalterada). O recibo combina os itens só pra exibição/impressão.
+// UMA nota fiscal por CONTA (cliente/mesa/comanda): os itens de todos os
+// pedidos da conta são combinados numa única NFC-e e num único cupom. Os ids
+// de todos os pedidos cobertos ficam em `pedidoIds` (pra gravar a mesma chave
+// em cada um e permitir reemissão).
 interface ReciboPedido {
     pedidoId: string
+    /** Todos os pedidos da conta cobertos por ESTA nota. */
+    pedidoIds?: string[]
     itens: ItemPedidoPDV[]
     total: number
     nfce?: NfceInfo
@@ -218,9 +222,15 @@ export default function CaixaClient({
     const supabase = createClient()
     const impressora = useThermalPrinter()
 
-    // Imprime o cupom de UM pedido da conta (NFC-e segue por pedido). Cada cupom
-    // fiscal mostra o próprio total como pago; o troco é da conta (nível caixa).
-    const imprimirCupomPedido = useCallback(async (p: ReciboPedido, forma: FormaPagamento, dataHora: string) => {
+    // Imprime o cupom fiscal da CONTA (1 NFC-e = 1 cupom). valorPago/troco vêm do
+    // nível da conta (caixa), refletindo o pagamento real do cliente.
+    const imprimirCupomPedido = useCallback(async (
+        p: ReciboPedido,
+        forma: FormaPagamento,
+        dataHora: string,
+        valorPago: number,
+        troco: number,
+    ) => {
         if (!p.nfce?.ok || !p.nfce.chaveAcesso) return
         if (!impressora.conectada) return  // sem impressora pareada nao tenta
         await impressora.imprimir({
@@ -237,18 +247,19 @@ export default function CaixaClient({
                 codigo: i.produto?.codigo ?? null,
             })),
             total: p.total,
-            valorPago: p.total,
-            troco: 0,
+            valorPago,
+            troco,
             formaPagamentoLabel: FORMA_LABEL[forma],
             dataHora,
             cpfCliente: p.cpfCliente,
         })
     }, [impressora])
 
-    // Imprime todas as notas emitidas de uma conta, em sequência.
+    // Imprime o(s) cupom(ns) da conta. Hoje é 1 cupom por conta; o loop cobre
+    // contas que (por falha parcial de emissão) tenham mais de uma nota.
     const imprimirReciboAuto = useCallback(async (r: DadosRecibo) => {
         for (const p of r.pedidos) {
-            await imprimirCupomPedido(p, r.formaPagamento, r.dataHora)
+            await imprimirCupomPedido(p, r.formaPagamento, r.dataHora, r.valorPago, r.troco)
         }
     }, [imprimirCupomPedido])
 
@@ -468,7 +479,7 @@ export default function CaixaClient({
 
     // ── Finalizar Venda ───────────────────────────────────────────────────────
 
-    async function emitirNFCe(pedido: PedidoPDV, forma: FormaPagamento, cpf?: string): Promise<NfceInfo> {
+    async function emitirNFCe(pedido: PedidoPDV, forma: FormaPagamento, cpf?: string, pedidoIdsConta?: string[]): Promise<NfceInfo> {
         try {
             const cpfDigits = cpf ? unformatCPF(cpf) : ''
             const cpfClienteEnvio = cpfDigits.length === 11 && isValidCPF(cpfDigits) ? cpfDigits : undefined
@@ -478,6 +489,8 @@ export default function CaixaClient({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     pedidoId: pedido.id,
+                    // Grava a mesma chave em TODOS os pedidos da conta (1 nota/conta).
+                    pedidoIds: pedidoIdsConta && pedidoIdsConta.length > 0 ? pedidoIdsConta : [pedido.id],
                     total: pedido.total,
                     formaPagamento: forma,
                     cpfCliente: cpfClienteEnvio,
@@ -529,7 +542,7 @@ export default function CaixaClient({
                 comanda: null,
                 itens_pedido: p.itens,
             }
-            const nfce = await emitirNFCe(pedidoMin, reciboAtual.formaPagamento, p.cpfCliente)
+            const nfce = await emitirNFCe(pedidoMin, reciboAtual.formaPagamento, p.cpfCliente, p.pedidoIds)
             atualizados.push({ ...p, nfce })
         }
         setReciboAtual({ ...reciboAtual, pedidos: atualizados })
@@ -550,7 +563,9 @@ export default function CaixaClient({
 
         setProcessandoVenda(true)
         try {
-            const reciboPedidos: ReciboPedido[] = []
+            // 1) Cobrança por pedido (estoque + caixa). Mantida por pedido porque
+            //    finalizar_venda_pdv baixa estoque e lança o movimento de caixa.
+            const pedidosPagos: PedidoPDV[] = []
             let falhasFinalizacao = 0
 
             for (const pedido of contaSelecionada.pedidos) {
@@ -564,18 +579,10 @@ export default function CaixaClient({
                     falhasFinalizacao++
                     continue
                 }
-                // NFC-e — emite após pagamento confirmado. Falha NÃO cancela a venda.
-                const nfce = await emitirNFCe(pedido, formaPagamento, cpfNota)
-                reciboPedidos.push({
-                    pedidoId: pedido.id,
-                    itens: pedido.itens_pedido,
-                    total: pedido.total,
-                    nfce,
-                    cpfCliente: cpfNota,
-                })
+                pedidosPagos.push(pedido)
             }
 
-            if (reciboPedidos.length === 0) {
+            if (pedidosPagos.length === 0) {
                 toast.error('Não foi possível finalizar a conta. Atualize e tente novamente.')
                 await carregarPedidosProntos()
                 return
@@ -583,6 +590,24 @@ export default function CaixaClient({
             if (falhasFinalizacao > 0) {
                 toast.warning(`${falhasFinalizacao} pedido(s) da conta seguem abertos e não foram cobrados.`)
             }
+
+            // 2) UMA NFC-e pra conta inteira: combina os itens de todos os pedidos
+            //    pagos num único documento fiscal => um único cupom por cliente.
+            const itensConta = pedidosPagos.flatMap((p) => p.itens_pedido)
+            const totalPago = pedidosPagos.reduce((s, p) => s + p.total, 0)
+            const idsConta = pedidosPagos.map((p) => p.id)
+            const pedidoConta: PedidoPDV = { ...pedidosPagos[0], total: totalPago, itens_pedido: itensConta }
+            // NFC-e — emite após pagamento confirmado. Falha NÃO cancela a venda.
+            const nfceConta = await emitirNFCe(pedidoConta, formaPagamento, cpfNota, idsConta)
+
+            const reciboPedidos: ReciboPedido[] = [{
+                pedidoId: pedidosPagos[0].id,
+                pedidoIds: idsConta,
+                itens: itensConta,
+                total: totalPago,
+                nfce: nfceConta,
+                cpfCliente: cpfNota,
+            }]
 
             // MED-06 FIX: Busca saldo atualizado do banco ao invés de calcular no client
             const { data: saldoRow } = await supabase
@@ -594,7 +619,6 @@ export default function CaixaClient({
                 .single()
             if (saldoRow) setSaldoAtual(saldoRow.saldo)
 
-            const totalPago = reciboPedidos.reduce((s, p) => s + p.total, 0)
             // Pontos de fidelidade sobre o total efetivamente pago (trigger: floor(total/10))
             const pontosGanhos = contaSelecionada.clienteNome
                 ? Math.max(Math.floor(totalPago / 10), 0)
@@ -887,7 +911,7 @@ export default function CaixaClient({
 
     return (
         <>
-            {/* ── DANFE NFC-e oculto pra impressão térmica 80mm (uma por nota emitida) ── */}
+            {/* ── DANFE NFC-e oculto pra impressão térmica 80mm (1 cupom por conta) ── */}
             {reciboAtual && reciboAtual.pedidos
                 .filter((p) => p.nfce?.ok && p.nfce.chaveAcesso)
                 .map((p) => (
@@ -896,8 +920,8 @@ export default function CaixaClient({
                         chaveAcesso={p.nfce!.chaveAcesso!}
                         itens={p.itens}
                         total={p.total}
-                        valorPago={p.total}
-                        troco={0}
+                        valorPago={reciboAtual.valorPago}
+                        troco={reciboAtual.troco}
                         formaPagamentoLabel={FORMA_LABEL[reciboAtual.formaPagamento]}
                         dataHora={reciboAtual.dataHora}
                         cpfCliente={p.cpfCliente}

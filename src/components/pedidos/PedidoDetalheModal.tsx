@@ -6,7 +6,7 @@ import { formatCurrency } from '@/lib/formatters'
 import { toast } from 'sonner'
 import {
     X, Loader2, Clock, MapPin, Truck, Trash2, Plus, Minus,
-    Pencil, Ban, Save, Search, ShoppingCart,
+    Pencil, Ban, Save, Search, ShoppingCart, Lock, KeyRound, Eye, EyeOff,
 } from 'lucide-react'
 
 interface ItemEdit {
@@ -48,6 +48,12 @@ export default function PedidoDetalheModal({
     const [showPicker, setShowPicker] = useState(false)
     const [produtos, setProdutos] = useState<ProdutoOpt[]>([])
     const [buscaProduto, setBuscaProduto] = useState('')
+
+    // Cancelamento protegido por senha de exclusão do ADM
+    const [senhaModal, setSenhaModal] = useState(false)
+    const [senhaExclusao, setSenhaExclusao] = useState('')
+    const [revelarSenha, setRevelarSenha] = useState(false)
+    const [verificandoSenha, setVerificandoSenha] = useState(false)
 
     const carregar = useCallback(async () => {
         setLoading(true)
@@ -159,15 +165,42 @@ export default function PedidoDetalheModal({
         }
     }
 
-    async function cancelarPedido() {
-        if (!confirm('Cancelar este pedido? Ele sai do fluxo e não é cobrado.')) return
-        setProcessando(true)
-        const { error } = await supabase.from('pedidos').update({ status: 'cancelado' }).eq('id', pedidoId)
-        setProcessando(false)
-        if (error) { toast.error('Erro ao cancelar', { description: error.message }); return }
-        toast.success('Pedido cancelado')
-        onChanged()
-        onClose()
+    // Abre o modal que pede a senha de exclusão do ADM (aprovação obrigatória).
+    function solicitarCancelamento() {
+        setSenhaExclusao('')
+        setRevelarSenha(false)
+        setSenhaModal(true)
+    }
+
+    // Valida a senha do ADM via RPC e, se conferir, cancela o pedido.
+    async function confirmarCancelamento() {
+        if (!senhaExclusao.trim()) {
+            toast.error('Informe a senha de exclusão do administrador.')
+            return
+        }
+        setVerificandoSenha(true)
+        try {
+            const { data: ok, error: errSenha } = await supabase.rpc('fn_verificar_senha_exclusao', {
+                p_senha: senhaExclusao.trim(),
+            })
+            if (errSenha) throw errSenha
+            if (ok !== true) {
+                toast.error('Senha incorreta ou não configurada pelo administrador.')
+                return
+            }
+
+            const { error } = await supabase.from('pedidos').update({ status: 'cancelado' }).eq('id', pedidoId)
+            if (error) { toast.error('Erro ao cancelar', { description: error.message }); return }
+
+            toast.success('Pedido cancelado')
+            setSenhaModal(false)
+            onChanged()
+            onClose()
+        } catch (err: any) {
+            toast.error('Erro ao validar a senha', { description: err?.message })
+        } finally {
+            setVerificandoSenha(false)
+        }
     }
 
     const comandaNumero = Array.isArray(pedido?.comanda) ? pedido?.comanda[0]?.numero : pedido?.comanda?.numero
@@ -311,7 +344,7 @@ export default function PedidoDetalheModal({
                         {!editMode ? (
                             ativo ? (
                                 <div className="flex gap-2">
-                                    <button onClick={cancelarPedido} disabled={processando}
+                                    <button onClick={solicitarCancelamento} disabled={processando}
                                         className="flex-1 py-2.5 rounded-xl bg-red-50 border border-red-200 text-red-600 font-bold text-sm flex items-center justify-center gap-1.5 hover:bg-red-100 disabled:opacity-50">
                                         <Ban className="w-4 h-4" /> Cancelar Pedido
                                     </button>
@@ -338,6 +371,61 @@ export default function PedidoDetalheModal({
                     </div>
                 )}
             </div>
+
+            {/* ── Sub-modal: senha de exclusão do ADM ── */}
+            {senhaModal && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs overflow-hidden">
+                        <div className="px-5 py-4 bg-red-50 border-b border-red-100 flex items-center gap-2">
+                            <Lock className="w-5 h-5 text-red-600" />
+                            <h3 className="font-extrabold text-gray-800 text-sm">Autorização do administrador</h3>
+                        </div>
+                        <div className="p-5 space-y-3">
+                            <p className="text-xs text-gray-500">
+                                Cancelar o pedido exige a <strong>senha de exclusão</strong> definida pelo administrador.
+                            </p>
+                            <div className="relative">
+                                <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                <input
+                                    type={revelarSenha ? 'text' : 'password'}
+                                    value={senhaExclusao}
+                                    onChange={(e) => setSenhaExclusao(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && confirmarCancelamento()}
+                                    placeholder="Senha de exclusão"
+                                    autoFocus
+                                    autoComplete="off"
+                                    className="w-full pl-10 pr-11 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-red-200 outline-none"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setRevelarSenha((v) => !v)}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-gray-600 rounded-lg"
+                                    title={revelarSenha ? 'Ocultar' : 'Mostrar'}
+                                >
+                                    {revelarSenha ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                </button>
+                            </div>
+                        </div>
+                        <div className="px-5 py-4 border-t border-gray-100 flex gap-2">
+                            <button
+                                onClick={() => setSenhaModal(false)}
+                                disabled={verificandoSenha}
+                                className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-700 font-bold text-sm disabled:opacity-50"
+                            >
+                                Voltar
+                            </button>
+                            <button
+                                onClick={confirmarCancelamento}
+                                disabled={verificandoSenha}
+                                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-50"
+                            >
+                                {verificandoSenha ? <Loader2 className="w-4 h-4 animate-spin" /> : <Ban className="w-4 h-4" />}
+                                Confirmar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }
