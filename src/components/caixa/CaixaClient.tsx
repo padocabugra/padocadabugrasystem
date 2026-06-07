@@ -224,16 +224,16 @@ export default function CaixaClient({
 
     // Imprime o cupom fiscal da CONTA (1 NFC-e = 1 cupom). valorPago/troco vêm do
     // nível da conta (caixa), refletindo o pagamento real do cliente.
+    // Retorna true só quando o cupom foi efetivamente impresso (pra rastrear falha).
     const imprimirCupomPedido = useCallback(async (
         p: ReciboPedido,
         forma: FormaPagamento,
         dataHora: string,
         valorPago: number,
         troco: number,
-    ) => {
-        if (!p.nfce?.ok || !p.nfce.chaveAcesso) return
-        if (!impressora.conectada) return  // sem impressora pareada nao tenta
-        await impressora.imprimir({
+    ): Promise<boolean> => {
+        if (!p.nfce?.ok || !p.nfce.chaveAcesso) return false
+        return impressora.imprimir({
             razaoSocial: process.env.NEXT_PUBLIC_EMPRESA_RAZAO_SOCIAL || 'BUGRA LTDA',
             cnpj: process.env.NEXT_PUBLIC_EMPRESA_CNPJ || '',
             inscricaoEstadual: process.env.NEXT_PUBLIC_EMPRESA_IE,
@@ -255,12 +255,16 @@ export default function CaixaClient({
         })
     }, [impressora])
 
-    // Imprime o(s) cupom(ns) da conta. Hoje é 1 cupom por conta; o loop cobre
-    // contas que (por falha parcial de emissão) tenham mais de uma nota.
-    const imprimirReciboAuto = useCallback(async (r: DadosRecibo) => {
-        for (const p of r.pedidos) {
-            await imprimirCupomPedido(p, r.formaPagamento, r.dataHora, r.valorPago, r.troco)
+    // Imprime o(s) cupom(ns) da conta. Retorna true se TODAS as notas saíram.
+    const imprimirReciboAuto = useCallback(async (r: DadosRecibo): Promise<boolean> => {
+        const comNota = r.pedidos.filter((p) => p.nfce?.ok && p.nfce.chaveAcesso)
+        if (comNota.length === 0) return false
+        let todasOk = true
+        for (const p of comNota) {
+            const ok = await imprimirCupomPedido(p, r.formaPagamento, r.dataHora, r.valorPago, r.troco)
+            if (!ok) todasOk = false
         }
+        return todasOk
     }, [imprimirCupomPedido])
 
     // Estado de abertura do caixa
@@ -283,6 +287,11 @@ export default function CaixaClient({
 
     // Modal Cupom Digital
     const [reciboAtual, setReciboAtual] = useState<DadosRecibo | null>(null)
+    // Status da impressão automática do cupom: idle (sem tentar) | ok | falha
+    const [statusImpressao, setStatusImpressao] = useState<'idle' | 'ok' | 'falha'>('idle')
+    // Guard: garante auto-impressão UMA vez por recibo (evita reimpressão quando a
+    // identidade da impressora muda — reaquisição/retry — e recria os callbacks).
+    const autoPrintReciboRef = useRef<DadosRecibo | null>(null)
 
     // CPF na nota (opcional). Formatado: 000.000.000-00
     const [cpfNota, setCpfNota] = useState('')
@@ -407,12 +416,25 @@ export default function CaixaClient({
         return () => { supabase.removeChannel(channel) }
     }, [supabase])
 
-    // Impressao automatica: sempre que o recibo aparecer com NFC-e emitida,
-    // dispara impressao silenciosa via WebUSB (se a impressora estiver pareada).
+    // Impressao automatica: dispara UMA vez por recibo (guard por ref). Sem o guard,
+    // mudar a impressora (reaquisicao/retry) recria imprimirReciboAuto e o efeito
+    // re-rodaria, reimprimindo o cupom. Re-tentativas ficam no botao manual.
     useEffect(() => {
-        if (reciboAtual && reciboAtual.pedidos.some((p) => p.nfce?.ok && p.nfce.chaveAcesso)) {
-            void imprimirReciboAuto(reciboAtual)
+        if (!reciboAtual) { autoPrintReciboRef.current = null; return }
+        if (autoPrintReciboRef.current === reciboAtual) return
+        if (reciboAtual.pedidos.some((p) => p.nfce?.ok && p.nfce.chaveAcesso)) {
+            autoPrintReciboRef.current = reciboAtual
+            setStatusImpressao('idle')
+            imprimirReciboAuto(reciboAtual).then((ok) => setStatusImpressao(ok ? 'ok' : 'falha'))
         }
+    }, [reciboAtual, imprimirReciboAuto])
+
+    // Reimpressão manual a partir do recibo (botão), atualizando o status.
+    const reimprimirReciboManual = useCallback(async () => {
+        if (!reciboAtual) return
+        const ok = await imprimirReciboAuto(reciboAtual)
+        setStatusImpressao(ok ? 'ok' : 'falha')
+        if (ok) toast.success('Cupom reimpresso')
     }, [reciboAtual, imprimirReciboAuto])
 
     // ── Filtro de busca (sobre as contas agrupadas) ────────────────────────────
@@ -1049,6 +1071,17 @@ export default function CaixaClient({
                                                 </p>
                                             </div>
                                         )}
+                                        {/* Status da impressão automática — deixa a falha VISÍVEL */}
+                                        {temOk && impressora.conectada && statusImpressao === 'falha' && (
+                                            <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700 font-semibold flex items-center gap-1.5">
+                                                <AlertTriangle className="w-4 h-4 shrink-0" /> O cupom não saiu na impressora. Toque em &quot;Reimprimir&quot; abaixo.
+                                            </div>
+                                        )}
+                                        {temOk && impressora.conectada && statusImpressao === 'ok' && (
+                                            <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-sm text-emerald-700 font-semibold flex items-center gap-1.5">
+                                                <CheckCircle2 className="w-4 h-4 shrink-0" /> Cupom impresso.
+                                            </div>
+                                        )}
                                         {temOk && impressora.suportado && !impressora.conectada && (
                                             <div className="space-y-2">
                                                 <button
@@ -1072,7 +1105,7 @@ export default function CaixaClient({
                                         )}
                                         {temOk && impressora.conectada && (
                                             <button
-                                                onClick={() => imprimirReciboAuto(reciboAtual!)}
+                                                onClick={reimprimirReciboManual}
                                                 className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-extrabold text-sm transition-all active:scale-[0.98] shadow-sm flex items-center justify-center gap-2"
                                             >
                                                 <Printer className="w-5 h-5" />

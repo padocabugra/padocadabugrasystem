@@ -122,15 +122,37 @@ export function ThermalPrinterProvider({ children }: { children: ReactNode }) {
         }
     }, [])
 
+    // Envia pra impressora com 1 retry resiliente: se a 1a tentativa falhar, o
+    // handle pode ter ficado "dormente" (apos inatividade/sleep ou reconexao).
+    // Reaver o device pareado (getDevices) e tentar de novo costuma resolver o
+    // classico "as vezes nao sai". Throw se as duas tentativas falharem.
+    const enviarComRetry = useCallback(async (
+        alvoInicial: ImpressoraPareada,
+        envio: (alvo: ImpressoraPareada) => Promise<void>,
+    ): Promise<void> => {
+        try {
+            await envio(alvoInicial)
+            return
+        } catch (errPrimeira) {
+            const fresh = await obterImpressoraPareada().catch(() => null)
+            if (!fresh) throw errPrimeira
+            setImpressora(fresh)
+            await envio(fresh) // 2a tentativa com handle renovado
+        }
+    }, [])
+
     const imprimir = useCallback(async (dados: DadosImpressaoNFCe): Promise<boolean> => {
-        if (!impressora) {
+        // Se o state perdeu o device, tenta reaver antes de desistir.
+        let alvo = impressora ?? await obterImpressoraPareada().catch(() => null)
+        if (alvo && !impressora) setImpressora(alvo)
+        if (!alvo) {
             toast.warning('Impressora nao configurada', {
                 description: 'Cupom emitido mas nao impresso. Conecte uma impressora no botao "Conectar".',
             })
             return false
         }
         try {
-            await imprimirNFCe(impressora, dados)
+            await enviarComRetry(alvo, (a) => imprimirNFCe(a, dados))
             return true
         } catch (err: any) {
             toast.error('Falha na impressao', {
@@ -138,17 +160,19 @@ export function ThermalPrinterProvider({ children }: { children: ReactNode }) {
             })
             return false
         }
-    }, [impressora])
+    }, [impressora, enviarComRetry])
 
     const imprimirComprovanteFechamento = useCallback(async (dados: DadosImpressaoFechamento): Promise<boolean> => {
-        if (!impressora) {
+        let alvo = impressora ?? await obterImpressoraPareada().catch(() => null)
+        if (alvo && !impressora) setImpressora(alvo)
+        if (!alvo) {
             toast.warning('Impressora nao configurada', {
                 description: 'Fechamento registrado, mas o comprovante nao foi impresso. Conecte uma impressora no PDV.',
             })
             return false
         }
         try {
-            await imprimirFechamento(impressora, dados)
+            await enviarComRetry(alvo, (a) => imprimirFechamento(a, dados))
             return true
         } catch (err: any) {
             toast.error('Falha ao imprimir o fechamento', {
@@ -156,7 +180,7 @@ export function ThermalPrinterProvider({ children }: { children: ReactNode }) {
             })
             return false
         }
-    }, [impressora])
+    }, [impressora, enviarComRetry])
 
     return (
         <PrinterContext.Provider

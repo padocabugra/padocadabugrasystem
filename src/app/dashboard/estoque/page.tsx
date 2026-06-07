@@ -5,6 +5,7 @@ import Link from 'next/link'
 import {
     Search, AlertTriangle, Package, TrendingDown, Filter,
     Edit2, Plus, ArrowUpCircle, ArrowDownCircle, RefreshCw, ClipboardCheck,
+    History, X, Truck, FileText,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/formatters'
@@ -29,6 +30,12 @@ function ModalAjuste({
     const [tipo, setTipo] = useState<'entrada' | 'saida' | 'ajuste'>('entrada')
     const [quantidade, setQuantidade] = useState('')
     const [observacao, setObservacao] = useState('')
+    // Dados de compra — só usados em 'entrada' (controle do que entra na empresa)
+    const [numeroNF, setNumeroNF] = useState('')
+    // Data local (en-CA => YYYY-MM-DD no fuso do navegador) — evita o off-by-one
+    // do toISOString() à noite em Campo Grande (UTC-4).
+    const [dataCompra, setDataCompra] = useState(() => new Date().toLocaleDateString('en-CA'))
+    const [fornecedor, setFornecedor] = useState('')
     const [loading, setLoading] = useState(false)
     const supabase = createClient()
 
@@ -54,11 +61,15 @@ function ModalAjuste({
                 .eq('id', produto.id)
             if (prodErr) throw prodErr
 
+            const ehEntrada = tipo === 'entrada'
             const { error: movErr } = await supabase.from('movimentacao_estoque').insert({
                 produto_id: produto.id,
                 tipo,
                 quantidade: qtd,
                 observacao: observacao || null,
+                numero_nota_fiscal: ehEntrada ? (numeroNF.trim() || null) : null,
+                data_compra: ehEntrada ? (dataCompra || null) : null,
+                fornecedor: ehEntrada ? (fornecedor.trim() || null) : null,
             })
             if (movErr) console.error('[ESTOQUE] Falha ao registrar movimentação:', movErr.message)
 
@@ -73,6 +84,11 @@ function ModalAjuste({
                     estoqueAnterior: estoqueDisponivel,
                     estoqueNovo: novoEstoque,
                     observacao: observacao || undefined,
+                    ...(ehEntrada ? {
+                        numeroNotaFiscal: numeroNF.trim() || undefined,
+                        dataCompra: dataCompra || undefined,
+                        fornecedor: fornecedor.trim() || undefined,
+                    } : {}),
                 },
             })
 
@@ -131,11 +147,48 @@ function ModalAjuste({
                             </span>
                         </div>
                     </div>
+                    {/* Dados da compra — só na ENTRADA (controle do que entra na empresa) */}
+                    {tipo === 'entrada' && (
+                        <div className="space-y-3 rounded-xl border border-emerald-100 bg-emerald-50/50 p-3">
+                            <p className="text-[11px] font-bold text-emerald-700 uppercase tracking-wide">Dados da compra</p>
+                            <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label className="text-xs font-semibold text-gray-600">Nº Nota Fiscal</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Ex: 001234"
+                                        value={numeroNF}
+                                        onChange={(e) => setNumeroNF(e.target.value)}
+                                        className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-200 outline-none"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs font-semibold text-gray-600">Data da Compra</label>
+                                    <input
+                                        type="date"
+                                        value={dataCompra}
+                                        onChange={(e) => setDataCompra(e.target.value)}
+                                        className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-200 outline-none"
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-xs font-semibold text-gray-600">Fornecedor</label>
+                                <input
+                                    type="text"
+                                    placeholder="Nome do fornecedor"
+                                    value={fornecedor}
+                                    onChange={(e) => setFornecedor(e.target.value)}
+                                    className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-200 outline-none"
+                                />
+                            </div>
+                        </div>
+                    )}
                     <div>
                         <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Observação (opcional)</label>
                         <input
                             type="text"
-                            placeholder="Ex: Compra NF 001..."
+                            placeholder="Ex: lote, validade, transportadora..."
                             value={observacao}
                             onChange={(e) => setObservacao(e.target.value)}
                             className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-200 outline-none"
@@ -160,6 +213,122 @@ function ModalAjuste({
     )
 }
 
+// ── Modal: Histórico de Entradas (controle do que entra na empresa) ───────────
+function ModalHistoricoEntradas({ onClose }: { onClose: () => void }) {
+    const supabase = createClient()
+    const [loading, setLoading] = useState(true)
+    const [entradas, setEntradas] = useState<any[]>([])
+    const [busca, setBusca] = useState('')
+
+    useEffect(() => {
+        let ativo = true
+        ;(async () => {
+            const { data } = await supabase
+                .from('movimentacao_estoque')
+                .select('id, quantidade, numero_nota_fiscal, data_compra, fornecedor, observacao, created_at, produto:produtos ( nome, unidade_medida )')
+                .eq('tipo', 'entrada')
+                .order('created_at', { ascending: false })
+                .limit(300)
+            if (!ativo) return
+            setEntradas(data ?? [])
+            setLoading(false)
+        })()
+        return () => { ativo = false }
+    }, [supabase])
+
+    const prodDe = (e: any) => (Array.isArray(e.produto) ? e.produto[0] : e.produto) ?? null
+    const fmtData = (d: string | null) => (d ? d.split('-').reverse().join('/') : '—')
+
+    const filtradas = entradas.filter((e) => {
+        if (!busca) return true
+        const t = busca.toLowerCase()
+        return (prodDe(e)?.nome ?? '').toLowerCase().includes(t)
+            || (e.fornecedor ?? '').toLowerCase().includes(t)
+            || (e.numero_nota_fiscal ?? '').toLowerCase().includes(t)
+    })
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
+                <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+                    <div className="flex items-center gap-2">
+                        <History className="w-5 h-5 text-blue-600" />
+                        <div>
+                            <h3 className="font-extrabold text-gray-800">Histórico de Entradas</h3>
+                            <p className="text-xs text-gray-500">Tudo que entrou na empresa: NF, data e fornecedor</p>
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
+                        <X className="w-4 h-4 text-gray-500" />
+                    </button>
+                </div>
+
+                <div className="p-4 shrink-0">
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <input
+                            type="text"
+                            placeholder="Buscar por produto, fornecedor ou nº da nota..."
+                            value={busca}
+                            onChange={(e) => setBusca(e.target.value)}
+                            className="w-full pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 outline-none"
+                        />
+                    </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto px-4 pb-4">
+                    {loading ? (
+                        <div className="flex justify-center py-16">
+                            <RefreshCw className="w-6 h-6 text-blue-500 animate-spin" />
+                        </div>
+                    ) : filtradas.length === 0 ? (
+                        <div className="flex flex-col items-center py-16 text-gray-400 gap-3">
+                            <Truck className="w-10 h-10 opacity-20" />
+                            <p className="text-sm font-medium">Nenhuma entrada registrada ainda.</p>
+                        </div>
+                    ) : (
+                        <table className="w-full text-sm text-left">
+                            <thead className="text-xs text-gray-500 uppercase tracking-wider border-b border-gray-100">
+                                <tr>
+                                    <th className="px-3 py-2 font-semibold">Data</th>
+                                    <th className="px-3 py-2 font-semibold">Produto</th>
+                                    <th className="px-3 py-2 font-semibold text-right">Qtd</th>
+                                    <th className="px-3 py-2 font-semibold">Nota Fiscal</th>
+                                    <th className="px-3 py-2 font-semibold">Fornecedor</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                                {filtradas.map((e) => {
+                                    const prod = prodDe(e)
+                                    return (
+                                        <tr key={e.id} className="hover:bg-blue-50/30">
+                                            <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">
+                                                {e.data_compra
+                                                    ? fmtData(e.data_compra)
+                                                    : new Date(e.created_at).toLocaleDateString('pt-BR')}
+                                            </td>
+                                            <td className="px-3 py-2.5 font-semibold text-gray-800">{prod?.nome ?? '—'}</td>
+                                            <td className="px-3 py-2.5 text-right text-gray-700">
+                                                {Number(e.quantidade).toLocaleString('pt-BR')} {prod?.unidade_medida ?? ''}
+                                            </td>
+                                            <td className="px-3 py-2.5">
+                                                {e.numero_nota_fiscal
+                                                    ? <span className="inline-flex items-center gap-1 text-gray-700"><FileText className="w-3 h-3 text-gray-400" />{e.numero_nota_fiscal}</span>
+                                                    : <span className="text-gray-300">—</span>}
+                                            </td>
+                                            <td className="px-3 py-2.5 text-gray-700">{e.fornecedor || <span className="text-gray-300">—</span>}</td>
+                                        </tr>
+                                    )
+                                })}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+            </div>
+        </div>
+    )
+}
+
 // ── Página Principal ─────────────────────────────────────────────────────────
 export default function EstoquePage() {
     const [produtos, setProdutos] = useState<Produto[]>([])
@@ -169,6 +338,7 @@ export default function EstoquePage() {
     const [modalEditar, setModalEditar] = useState<Produto | null>(null)
     const [modalAjuste, setModalAjuste] = useState<Produto | null>(null)
     const [isModalNovo, setIsModalNovo] = useState(false)
+    const [isHistoricoOpen, setIsHistoricoOpen] = useState(false)
     const [pagina, setPagina] = useState(1)
     const supabase = createClient()
 
@@ -244,6 +414,13 @@ export default function EstoquePage() {
                     <p className="text-sm text-gray-500 mt-0.5">Controle de produtos, matérias-primas e alertas de reposição</p>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                        onClick={() => setIsHistoricoOpen(true)}
+                        className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 rounded-xl text-sm font-bold transition-all active:scale-[0.98] shadow-sm"
+                    >
+                        <History className="w-4 h-4 text-blue-600" />
+                        Histórico de Entradas
+                    </button>
                     <Link
                         href="/dashboard/estoque/inventario"
                         className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-xl text-sm font-bold transition-all active:scale-[0.98] shadow-sm"
@@ -452,6 +629,7 @@ export default function EstoquePage() {
                 onSuccess={fetchProdutos}
                 produtoToEdit={modalEditar}
             />
+            {isHistoricoOpen && <ModalHistoricoEntradas onClose={() => setIsHistoricoOpen(false)} />}
         </div>
     )
 }

@@ -6,8 +6,14 @@ import { formatCurrency } from '@/lib/formatters'
 import { toast } from 'sonner'
 import {
     X, Loader2, Clock, MapPin, Truck, Trash2, Plus, Minus,
-    Pencil, Ban, Save, Search, ShoppingCart, Lock, KeyRound, Eye, EyeOff,
+    Pencil, Ban, Save, Search, ShoppingCart, Lock, KeyRound, Eye, EyeOff, Printer,
 } from 'lucide-react'
+import { useThermalPrinter } from '@/components/shared/ThermalPrinterContext'
+
+// Rótulos das formas de pagamento (espelha o Caixa) — usado na reimpressão.
+const FORMA_PAGAMENTO_LABEL: Record<string, string> = {
+    dinheiro: 'Dinheiro', pix: 'PIX', debito: 'Cartão Débito', credito: 'Cartão Crédito',
+}
 
 interface ItemEdit {
     id?: string
@@ -16,6 +22,7 @@ interface ItemEdit {
     preco: number
     quantidade: number
     unidade_medida?: string | null
+    codigo?: string | null
 }
 
 interface ProdutoOpt {
@@ -37,7 +44,9 @@ export default function PedidoDetalheModal({
     onChanged: () => void
 }) {
     const supabase = createClient()
+    const impressora = useThermalPrinter()
     const [loading, setLoading] = useState(true)
+    const [reimprimindo, setReimprimindo] = useState(false)
     const [pedido, setPedido] = useState<any | null>(null)
     const [itens, setItens] = useState<ItemEdit[]>([])
     const [editMode, setEditMode] = useState(false)
@@ -61,11 +70,12 @@ export default function PedidoDetalheModal({
             .from('pedidos')
             .select(`
                 id, numero_mesa, comanda_id, total, status, tipo_pedido, forma_pagamento, created_at,
+                chave_nfce, nfce_status,
                 cliente:clientes ( nome ),
                 comanda:comandas!pedidos_comanda_id_fkey ( numero ),
                 itens_pedido (
                     id, quantidade, preco_unitario,
-                    produto:produtos ( id, nome, preco, unidade_medida )
+                    produto:produtos ( id, nome, preco, unidade_medida, codigo )
                 )
             `)
             .eq('id', pedidoId)
@@ -81,6 +91,7 @@ export default function PedidoDetalheModal({
                     preco: Number(i.preco_unitario),
                     quantidade: Number(i.quantidade),
                     unidade_medida: prod?.unidade_medida ?? 'un',
+                    codigo: prod?.codigo ?? null,
                 }
             })
             setItens(its)
@@ -200,6 +211,48 @@ export default function PedidoDetalheModal({
             toast.error('Erro ao validar a senha', { description: err?.message })
         } finally {
             setVerificandoSenha(false)
+        }
+    }
+
+    // Reimpressão do cupom fiscal de uma venda passada (anti-falha de impressão).
+    // Reconstrói o DANFE a partir da chave já emitida + itens do pedido.
+    async function reimprimirCupom() {
+        if (!pedido?.chave_nfce) {
+            toast.error('Este pedido não tem NFC-e emitida para reimprimir.')
+            return
+        }
+        if (!impressora.suportado) {
+            toast.warning('Impressão térmica indisponível', { description: 'Abra o sistema no Chrome/Edge do PDV.' })
+            return
+        }
+        if (!impressora.conectada) {
+            toast.warning('Impressora não conectada', { description: 'Conecte a impressora no Caixa/PDV e tente de novo.' })
+            return
+        }
+        setReimprimindo(true)
+        try {
+            const ok = await impressora.imprimir({
+                razaoSocial: process.env.NEXT_PUBLIC_EMPRESA_RAZAO_SOCIAL || 'BUGRA LTDA',
+                cnpj: process.env.NEXT_PUBLIC_EMPRESA_CNPJ || '',
+                inscricaoEstadual: process.env.NEXT_PUBLIC_EMPRESA_IE,
+                endereco: process.env.NEXT_PUBLIC_EMPRESA_ENDERECO,
+                chaveAcesso: pedido.chave_nfce,
+                itens: itens.map((i) => ({
+                    quantidade: i.quantidade,
+                    precoUnitario: i.preco,
+                    subtotal: i.preco * i.quantidade,
+                    nome: i.nome,
+                    codigo: i.codigo ?? null,
+                })),
+                total: Number(pedido.total),
+                valorPago: Number(pedido.total),
+                troco: 0,
+                formaPagamentoLabel: FORMA_PAGAMENTO_LABEL[pedido.forma_pagamento] ?? (pedido.forma_pagamento || '—'),
+                dataHora: new Date(pedido.created_at).toLocaleString('pt-BR'),
+            })
+            if (ok) toast.success('Cupom reimpresso com sucesso')
+        } finally {
+            setReimprimindo(false)
         }
     }
 
@@ -341,6 +394,14 @@ export default function PedidoDetalheModal({
                 {/* Rodapé com ações */}
                 {!loading && (
                     <div className="px-5 py-4 border-t border-gray-100 shrink-0 space-y-2">
+                        {/* Reimpressão do cupom fiscal — disponível p/ qualquer venda com NFC-e */}
+                        {!editMode && pedido?.chave_nfce && (
+                            <button onClick={reimprimirCupom} disabled={reimprimindo}
+                                className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-50">
+                                {reimprimindo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                                Reimprimir Cupom Fiscal
+                            </button>
+                        )}
                         {!editMode ? (
                             ativo ? (
                                 <div className="flex gap-2">
