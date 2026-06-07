@@ -7,11 +7,13 @@ import { toast } from 'sonner'
 import {
     Search, Receipt, Banknote, CreditCard, Smartphone, ArrowDownCircle,
     ArrowUpCircle, ChevronRight, RefreshCw, CheckCircle2, X,
-    DollarSign, Clock, AlertTriangle, Hash, User, Star, Printer, Lock, Copy
+    DollarSign, Clock, AlertTriangle, Hash, User, Star, Printer, Lock, Copy, BadgePercent
 } from 'lucide-react'
 import { dataHoraLocalVisual, getAgoraUTC } from '@/lib/timezone'
 import { unformatCPF, isValidCPF } from '@/lib/formatters'
 import CpfNotaInput from '@/components/shared/CpfNotaInput'
+import DescontoModal from '@/components/shared/DescontoModal'
+import { round2, distribuirDesconto } from '@/lib/desconto'
 import { registrarAuditLog } from '@/lib/audit-log'
 import { QRCodeSVG } from 'qrcode.react'
 import { gerarPixCopiaECola, PIX_RECEBEDOR } from '@/lib/pix'
@@ -147,7 +149,8 @@ interface ReciboPedido {
     /** Todos os pedidos da conta cobertos por ESTA nota. */
     pedidoIds?: string[]
     itens: ItemPedidoPDV[]
-    total: number
+    total: number                // total LÍQUIDO (já com desconto)
+    desconto?: number            // desconto concedido na conta (R$)
     nfce?: NfceInfo
     /** CPF formatado (snapshot pra reemitir). Vazio se não informado. */
     cpfCliente?: string
@@ -157,7 +160,8 @@ interface DadosRecibo {
     contaLabel: string
     clienteNome: string | null
     itens: ItemPedidoPDV[]       // combinados (exibição)
-    total: number                // total da conta
+    total: number                // total LÍQUIDO da conta (já com desconto)
+    desconto: number             // desconto concedido (R$)
     valorPago: number
     troco: number
     formaPagamento: FormaPagamento
@@ -247,6 +251,7 @@ export default function CaixaClient({
                 codigo: i.produto?.codigo ?? null,
             })),
             total: p.total,
+            desconto: p.desconto ?? 0,
             valorPago,
             troco,
             formaPagamentoLabel: FORMA_LABEL[forma],
@@ -281,6 +286,9 @@ export default function CaixaClient({
     const [contaSelecionadaKey, setContaSelecionadaKey] = useState<string | null>(null)
     const [formaPagamento, setFormaPagamento] = useState<FormaPagamento>('dinheiro')
     const [valorRecebido, setValorRecebido] = useState('')
+    // Desconto aplicado na conta selecionada (R$). Modal R$/%.
+    const [descontoConta, setDescontoConta] = useState(0)
+    const [modalDesconto, setModalDesconto] = useState(false)
     const [processandoVenda, setProcessandoVenda] = useState(false)
     const [processandoCancelamento, setProcessandoCancelamento] = useState(false)
     const [carregandoPedidos, setCarregandoPedidos] = useState(false)
@@ -335,6 +343,9 @@ export default function CaixaClient({
         () => contas.find((c) => c.key === contaSelecionadaKey) ?? null,
         [contas, contaSelecionadaKey]
     )
+
+    // Trocar de conta zera o desconto (cada conta tem o seu).
+    useEffect(() => { setDescontoConta(0) }, [contaSelecionadaKey])
 
     // ── Carregar pedidos prontos ──────────────────────────────────────────────
 
@@ -448,11 +459,16 @@ export default function CaixaClient({
         return Boolean(mesaMatch || comandaMatch || clienteMatch)
     })
 
-    // ── Cálculo troco ─────────────────────────────────────────────────────────
+    // ── Cálculo de desconto / total líquido / troco ────────────────────────────
+
+    const totalBrutoConta = contaSelecionada?.total ?? 0
+    // Desconto nunca passa do bruto (defensivo — o modal já limita).
+    const descontoAplicado = Math.min(round2(descontoConta), round2(totalBrutoConta))
+    const totalLiquidoConta = round2(Math.max(0, totalBrutoConta - descontoAplicado))
 
     const valorRecebidoNum = parseFloat(valorRecebido.replace(',', '.')) || 0
     const troco = formaPagamento === 'dinheiro'
-        ? Math.max(0, valorRecebidoNum - (contaSelecionada?.total ?? 0))
+        ? Math.max(0, valorRecebidoNum - totalLiquidoConta)
         : 0
 
     // ── Abertura de Caixa ─────────────────────────────────────────────────────
@@ -501,7 +517,7 @@ export default function CaixaClient({
 
     // ── Finalizar Venda ───────────────────────────────────────────────────────
 
-    async function emitirNFCe(pedido: PedidoPDV, forma: FormaPagamento, cpf?: string, pedidoIdsConta?: string[]): Promise<NfceInfo> {
+    async function emitirNFCe(pedido: PedidoPDV, forma: FormaPagamento, cpf?: string, pedidoIdsConta?: string[], descontoNota = 0): Promise<NfceInfo> {
         try {
             const cpfDigits = cpf ? unformatCPF(cpf) : ''
             const cpfClienteEnvio = cpfDigits.length === 11 && isValidCPF(cpfDigits) ? cpfDigits : undefined
@@ -513,7 +529,9 @@ export default function CaixaClient({
                     pedidoId: pedido.id,
                     // Grava a mesma chave em TODOS os pedidos da conta (1 nota/conta).
                     pedidoIds: pedidoIdsConta && pedidoIdsConta.length > 0 ? pedidoIdsConta : [pedido.id],
+                    // pedido.total já é o LÍQUIDO; o desconto vai à parte pro rateio por item.
                     total: pedido.total,
+                    desconto: descontoNota,
                     formaPagamento: forma,
                     cpfCliente: cpfClienteEnvio,
                     itens: pedido.itens_pedido.map((i) => ({
@@ -564,7 +582,7 @@ export default function CaixaClient({
                 comanda: null,
                 itens_pedido: p.itens,
             }
-            const nfce = await emitirNFCe(pedidoMin, reciboAtual.formaPagamento, p.cpfCliente, p.pedidoIds)
+            const nfce = await emitirNFCe(pedidoMin, reciboAtual.formaPagamento, p.cpfCliente, p.pedidoIds, p.desconto ?? 0)
             atualizados.push({ ...p, nfce })
         }
         setReciboAtual({ ...reciboAtual, pedidos: atualizados })
@@ -575,33 +593,47 @@ export default function CaixaClient({
     async function handleFinalizarVenda() {
         if (!contaSelecionada || !aberturaHoje) return
 
-        const totalConta = contaSelecionada.total
-        const valorPago = formaPagamento === 'dinheiro' ? valorRecebidoNum : totalConta
+        const totalBruto = contaSelecionada.total
+        const descontoTotal = Math.min(round2(descontoAplicado), round2(totalBruto))
+        const totalLiquido = round2(totalBruto - descontoTotal)
+        const valorPago = formaPagamento === 'dinheiro' ? valorRecebidoNum : totalLiquido
 
-        if (formaPagamento === 'dinheiro' && valorPago < totalConta) {
+        if (formaPagamento === 'dinheiro' && valorPago < totalLiquido) {
             toast.error('Valor recebido menor que o total da conta')
             return
         }
 
         setProcessandoVenda(true)
         try {
+            // Rateia o desconto da conta entre os pedidos (proporcional ao total
+            // de cada um), pra que cada finalizar_venda_pdv grave o líquido certo.
+            const descontosPorPedido = distribuirDesconto(
+                descontoTotal,
+                contaSelecionada.pedidos.map((p) => p.total),
+            )
+
             // 1) Cobrança por pedido (estoque + caixa). Mantida por pedido porque
             //    finalizar_venda_pdv baixa estoque e lança o movimento de caixa.
             const pedidosPagos: PedidoPDV[] = []
+            const descontosPagos: number[] = []
             let falhasFinalizacao = 0
 
-            for (const pedido of contaSelecionada.pedidos) {
+            for (let i = 0; i < contaSelecionada.pedidos.length; i++) {
+                const pedido = contaSelecionada.pedidos[i]
+                const dPedido = descontosPorPedido[i] ?? 0
                 const { error } = await supabase.rpc('finalizar_venda_pdv', {
                     p_pedido_id: pedido.id,
                     p_forma_pagamento: formaPagamento,
-                    p_valor_pago: pedido.total,
+                    p_valor_pago: round2(pedido.total - dPedido),
                     p_usuario_id: usuarioId,
+                    p_desconto: dPedido,
                 })
                 if (error) {
                     falhasFinalizacao++
                     continue
                 }
                 pedidosPagos.push(pedido)
+                descontosPagos.push(dPedido)
             }
 
             if (pedidosPagos.length === 0) {
@@ -615,18 +647,23 @@ export default function CaixaClient({
 
             // 2) UMA NFC-e pra conta inteira: combina os itens de todos os pedidos
             //    pagos num único documento fiscal => um único cupom por cliente.
+            //    O desconto efetivo é só o dos pedidos que realmente foram pagos.
             const itensConta = pedidosPagos.flatMap((p) => p.itens_pedido)
-            const totalPago = pedidosPagos.reduce((s, p) => s + p.total, 0)
+            const brutoPago = round2(pedidosPagos.reduce((s, p) => s + p.total, 0))
+            const descontoEfetivo = round2(descontosPagos.reduce((s, d) => s + d, 0))
+            const liquidoPago = round2(brutoPago - descontoEfetivo)
             const idsConta = pedidosPagos.map((p) => p.id)
-            const pedidoConta: PedidoPDV = { ...pedidosPagos[0], total: totalPago, itens_pedido: itensConta }
+            // pedidoConta.total = líquido (é o que a NFC-e envia como total).
+            const pedidoConta: PedidoPDV = { ...pedidosPagos[0], total: liquidoPago, itens_pedido: itensConta }
             // NFC-e — emite após pagamento confirmado. Falha NÃO cancela a venda.
-            const nfceConta = await emitirNFCe(pedidoConta, formaPagamento, cpfNota, idsConta)
+            const nfceConta = await emitirNFCe(pedidoConta, formaPagamento, cpfNota, idsConta, descontoEfetivo)
 
             const reciboPedidos: ReciboPedido[] = [{
                 pedidoId: pedidosPagos[0].id,
                 pedidoIds: idsConta,
                 itens: itensConta,
-                total: totalPago,
+                total: liquidoPago,
+                desconto: descontoEfetivo,
                 nfce: nfceConta,
                 cpfCliente: cpfNota,
             }]
@@ -641,18 +678,19 @@ export default function CaixaClient({
                 .single()
             if (saldoRow) setSaldoAtual(saldoRow.saldo)
 
-            // Pontos de fidelidade sobre o total efetivamente pago (trigger: floor(total/10))
+            // Pontos de fidelidade sobre o líquido pago (trigger: floor(total/10))
             const pontosGanhos = contaSelecionada.clienteNome
-                ? Math.max(Math.floor(totalPago / 10), 0)
+                ? Math.max(Math.floor(liquidoPago / 10), 0)
                 : 0
 
             const recibo: DadosRecibo = {
                 contaLabel: contaSelecionada.label,
                 clienteNome: contaSelecionada.clienteNome,
                 itens: reciboPedidos.flatMap((p) => p.itens),
-                total: totalPago,
+                total: liquidoPago,
+                desconto: descontoEfetivo,
                 valorPago,
-                troco: formaPagamento === 'dinheiro' ? Math.max(0, valorPago - totalPago) : 0,
+                troco: formaPagamento === 'dinheiro' ? Math.max(0, valorPago - liquidoPago) : 0,
                 formaPagamento,
                 pontosGanhos,
                 dataHora: dataHoraLocalVisual(getAgoraUTC()),
@@ -664,7 +702,9 @@ export default function CaixaClient({
                 entidade: 'pedidos',
                 entidade_id: reciboPedidos[0].pedidoId,
                 detalhes: {
-                    total: totalPago,
+                    subtotal: brutoPago,
+                    desconto: descontoEfetivo,
+                    total: liquidoPago,
                     formaPagamento,
                     valorPago,
                     conta: contaSelecionada.label,
@@ -677,6 +717,7 @@ export default function CaixaClient({
 
             setReciboAtual(recibo)
             setContaSelecionadaKey(null)
+            setDescontoConta(0)
             setFormaPagamento('dinheiro')
             setValorRecebido('')
             setCpfNota('')
@@ -942,6 +983,7 @@ export default function CaixaClient({
                         chaveAcesso={p.nfce!.chaveAcesso!}
                         itens={p.itens}
                         total={p.total}
+                        desconto={p.desconto ?? 0}
                         valorPago={reciboAtual.valorPago}
                         troco={reciboAtual.troco}
                         formaPagamentoLabel={FORMA_LABEL[reciboAtual.formaPagamento]}
@@ -1002,6 +1044,20 @@ export default function CaixaClient({
 
                             {/* Separador */}
                             <div className="border-t border-dashed border-gray-200" />
+
+                            {/* Subtotal + Desconto (só quando houve desconto) */}
+                            {reciboAtual.desconto > 0 && (
+                                <>
+                                    <div className="flex items-center justify-between text-sm">
+                                        <span className="text-gray-500 font-medium">Subtotal</span>
+                                        <span className="font-semibold text-gray-700">{formatCurrency(reciboAtual.total + reciboAtual.desconto)}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between text-sm">
+                                        <span className="text-amber-600 font-medium flex items-center gap-1.5"><BadgePercent className="w-4 h-4" /> Desconto</span>
+                                        <span className="font-bold text-amber-600">- {formatCurrency(reciboAtual.desconto)}</span>
+                                    </div>
+                                </>
+                            )}
 
                             {/* Total */}
                             <div className="flex items-center justify-between">
@@ -1429,7 +1485,7 @@ export default function CaixaClient({
                         <div className="p-6 flex flex-col items-center">
                             {(() => {
                                 const pixPayload = gerarPixCopiaECola({
-                                    valor: contaSelecionada.total,
+                                    valor: totalLiquidoConta,
                                     txid: contaSelecionada.pedidos[0]?.id?.replace(/-/g, '').slice(0, 25),
                                 })
                                 return (
@@ -1443,7 +1499,10 @@ export default function CaixaClient({
                                             />
                                         </div>
                                         <p className="text-sm text-gray-500 mb-1">Total a Pagar</p>
-                                        <p className="text-3xl font-black text-gray-900 mb-1">{formatCurrency(contaSelecionada.total)}</p>
+                                        <p className="text-3xl font-black text-gray-900 mb-1">{formatCurrency(totalLiquidoConta)}</p>
+                                        {descontoAplicado > 0 && (
+                                            <p className="text-xs text-amber-600 font-semibold mb-1">desconto de {formatCurrency(descontoAplicado)} aplicado</p>
+                                        )}
                                         <p className="text-xs text-gray-400 mb-4">{PIX_RECEBEDOR.nome}</p>
 
                                         <button
@@ -1486,6 +1545,16 @@ export default function CaixaClient({
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* ── Modal de Desconto ── */}
+            {modalDesconto && contaSelecionada && (
+                <DescontoModal
+                    totalBruto={totalBrutoConta}
+                    descontoAtual={descontoAplicado}
+                    onAplicar={(d) => setDescontoConta(d)}
+                    onClose={() => setModalDesconto(false)}
+                />
             )}
 
             {/* ── Layout Principal ──
@@ -1721,12 +1790,46 @@ export default function CaixaClient({
                                     lista de itens acima ocupa a altura real (antes o sticky daqui
                                     espremia os itens a uma "janelinha"). shrink-0 evita compressão. */}
                                 <div className="bg-white border-t border-blue-100 p-4 space-y-3.5 shrink-0">
-                                    {/* Total */}
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-sm font-semibold text-gray-500">Total da Conta</span>
-                                        <span className="text-2xl font-black text-gray-900">
-                                            {formatCurrency(contaSelecionada.total)}
-                                        </span>
+                                    {/* Totais + Desconto */}
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-sm font-semibold text-gray-500">
+                                                {descontoAplicado > 0 ? 'Subtotal' : 'Total da Conta'}
+                                            </span>
+                                            <span className={descontoAplicado > 0
+                                                ? 'text-base font-bold text-gray-400 line-through'
+                                                : 'text-2xl font-black text-gray-900'}>
+                                                {formatCurrency(totalBrutoConta)}
+                                            </span>
+                                        </div>
+
+                                        {descontoAplicado > 0 && (
+                                            <>
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-sm font-medium text-amber-600 flex items-center gap-1.5">
+                                                        <BadgePercent className="w-4 h-4" /> Desconto
+                                                    </span>
+                                                    <span className="text-sm font-bold text-amber-600">- {formatCurrency(descontoAplicado)}</span>
+                                                </div>
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-sm font-semibold text-gray-700">Total a pagar</span>
+                                                    <span className="text-2xl font-black text-emerald-600">{formatCurrency(totalLiquidoConta)}</span>
+                                                </div>
+                                            </>
+                                        )}
+
+                                        {/* Botão de desconto — sempre acessível, destacado quando aplicado */}
+                                        <button
+                                            onClick={() => setModalDesconto(true)}
+                                            className={`w-full py-2.5 rounded-xl border-2 border-dashed text-sm font-bold flex items-center justify-center gap-1.5 transition-colors active:scale-[0.99] ${descontoAplicado > 0
+                                                ? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                                                : 'border-gray-200 text-gray-500 hover:border-amber-300 hover:text-amber-600'}`}
+                                        >
+                                            <BadgePercent className="w-4 h-4" />
+                                            {descontoAplicado > 0
+                                                ? `Desconto aplicado: ${formatCurrency(descontoAplicado)} · alterar`
+                                                : 'Aplicar desconto'}
+                                        </button>
                                     </div>
 
                                     {/* CPF na nota (opcional) — antes da forma de pagamento */}
@@ -1768,9 +1871,9 @@ export default function CaixaClient({
                                                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm font-medium">R$</span>
                                                     <input
                                                         type="number"
-                                                        min={contaSelecionada.total}
+                                                        min={totalLiquidoConta}
                                                         step="0.01"
-                                                        placeholder={contaSelecionada.total.toFixed(2)}
+                                                        placeholder={totalLiquidoConta.toFixed(2)}
                                                         value={valorRecebido}
                                                         onChange={(e) => setValorRecebido(e.target.value)}
                                                         className="w-full pl-10 pr-3 py-2.5 border-2 border-gray-200 focus:border-blue-400 rounded-xl text-base font-bold outline-none transition-colors"
@@ -1807,7 +1910,7 @@ export default function CaixaClient({
                                         disabled={
                                             processandoVenda ||
                                             !aberturaHoje ||
-                                            (formaPagamento === 'dinheiro' && valorRecebidoNum < contaSelecionada.total)
+                                            (formaPagamento === 'dinheiro' && valorRecebidoNum < totalLiquidoConta)
                                         }
                                         className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-2xl font-extrabold text-base transition-all active:scale-[0.98] shadow-sm flex items-center justify-center gap-2 disabled:cursor-not-allowed"
                                     >

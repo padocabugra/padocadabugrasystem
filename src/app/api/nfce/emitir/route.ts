@@ -36,7 +36,7 @@ export async function POST(req: Request) {
 
         // ── Validação de payload ─────────────────────────────────────
         const body = await req.json()
-        const { pedidoId, pedidoIds, itens, total, formaPagamento, cpfCliente } = body ?? {}
+        const { pedidoId, pedidoIds, itens, total, formaPagamento, cpfCliente, desconto } = body ?? {}
 
         if (!Array.isArray(itens) || itens.length === 0 || !total || !formaPagamento) {
             return NextResponse.json(
@@ -59,10 +59,15 @@ export async function POST(req: Request) {
             )
         }
 
+        // Desconto opcional (R$ sobre o total bruto). Saneado: número >= 0.
+        const descontoNum = Number(desconto)
+        const descontoSeguro = Number.isFinite(descontoNum) && descontoNum > 0 ? descontoNum : 0
+
         // ── Emissão NFC-e ────────────────────────────────────────────
         const resultado = await emitirNFCe({
             itens: itens as ItemNFCe[],
             total: Number(total),
+            desconto: descontoSeguro,
             formaPagamento: String(formaPagamento),
             cpfCliente: cpfCliente || undefined,
             identificadorInterno: pedidoId && typeof pedidoId === 'string' ? pedidoId : undefined,

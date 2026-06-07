@@ -69,7 +69,7 @@ export default function PedidoDetalheModal({
         const { data } = await supabase
             .from('pedidos')
             .select(`
-                id, numero_mesa, comanda_id, total, status, tipo_pedido, forma_pagamento, created_at,
+                id, numero_mesa, comanda_id, total, desconto, status, tipo_pedido, forma_pagamento, created_at,
                 chave_nfce, nfce_status,
                 cliente:clientes ( nome ),
                 comanda:comandas!pedidos_comanda_id_fkey ( numero ),
@@ -245,6 +245,7 @@ export default function PedidoDetalheModal({
                     codigo: i.codigo ?? null,
                 })),
                 total: Number(pedido.total),
+                desconto: Number(pedido.desconto) || 0,
                 valorPago: Number(pedido.total),
                 troco: 0,
                 formaPagamentoLabel: FORMA_PAGAMENTO_LABEL[pedido.forma_pagamento] ?? (pedido.forma_pagamento || '—'),
@@ -307,6 +308,18 @@ export default function PedidoDetalheModal({
                                 ))}
                             </div>
                             <div className="border-t border-dashed border-gray-200" />
+                            {Number(pedido?.desconto) > 0 && (
+                                <>
+                                    <div className="flex items-center justify-between text-sm">
+                                        <span className="text-gray-500 font-medium">Subtotal</span>
+                                        <span className="font-semibold text-gray-700">{formatCurrency(Number(pedido?.total ?? 0) + Number(pedido?.desconto ?? 0))}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between text-sm">
+                                        <span className="text-amber-600 font-medium">Desconto</span>
+                                        <span className="font-bold text-amber-600">- {formatCurrency(Number(pedido?.desconto ?? 0))}</span>
+                                    </div>
+                                </>
+                            )}
                             <div className="flex items-center justify-between">
                                 <span className="text-sm font-semibold text-gray-500">Total</span>
                                 <span className="text-xl font-black text-gray-900">{formatCurrency(Number(pedido?.total ?? 0))}</span>

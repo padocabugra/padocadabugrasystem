@@ -41,7 +41,8 @@ export interface DadosImpressaoNFCe {
         nome: string
         codigo?: string | null
     }>
-    total: number
+    total: number               // total LÍQUIDO (já com desconto aplicado)
+    desconto?: number           // desconto concedido (R$); mostra Subtotal/Desconto quando > 0
     valorPago: number
     troco: number
     formaPagamentoLabel: string
@@ -213,7 +214,13 @@ function montarCupomEscPos(dados: DadosImpressaoNFCe): Uint8Array {
 
     enc.line('--------------------------------')
 
-    // Totais
+    // Totais — quando há desconto, mostra Subtotal e Desconto antes do Total.
+    const descCupom = dados.desconto && dados.desconto > 0 ? dados.desconto : 0
+    if (descCupom > 0) {
+        enc.line(linhaLR('Subtotal', formatBRL(dados.total + descCupom)))
+        enc.line(linhaLR('Desconto', '-' + formatBRL(descCupom)))
+    }
+
     const linhaTotal = `TOTAL R$`
     const valorTotal = formatBRL(dados.total)
     enc

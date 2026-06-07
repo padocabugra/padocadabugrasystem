@@ -16,6 +16,7 @@
 // =============================================================
 
 import { formatInTimeZone } from 'date-fns-tz'
+import { distribuirDesconto, round2 } from './desconto'
 
 const TIMEZONE = 'America/Campo_Grande'
 
@@ -86,6 +87,8 @@ export interface DadosNFCe {
     total: number
     formaPagamento: string
     cpfCliente?: string
+    /** Desconto concedido (R$) sobre o total bruto dos itens. Default 0. */
+    desconto?: number
     /** ID único do pedido para idempotência (IdentificadorInterno). */
     identificadorInterno?: string
 }
@@ -126,55 +129,23 @@ export async function emitirNFCe(dados: DadosNFCe): Promise<ResultadoNFCe> {
 
     const dataHora = dataEmissaoLocal()
 
-    // ─── Itens e total fiscal ───────────────────────────────
-    // VlPago PRECISA bater com o vNF que a SEFAZ calcula item a item
-    // (Σ round2(qtd × valorUnitário)). Antes o pagamento vinha de dados.total,
-    // que é somado SEM arredondar por item (CarrinhoLateral) → diverge em
-    // centavos em itens por peso/kg e dispara rejeição de troco (865/866).
-    // Derivar o pagamento da MESMA fonte dos itens garante vPag ≡ vNF.
-    const round2 = (n: number) => Math.round(n * 100) / 100
-    const produtos = dados.itens.map((item) => {
+    // ─── Itens + rateio do desconto ─────────────────────────
+    // Cada item leva ValorTotal bruto e a sua parcela do desconto (ValorDesconto).
+    // VlPago = Σ bruto − Σ desconto, garantindo Σitens − Σdesc = total da nota
+    // (a SEFAZ rejeita se o total do pagamento não bater com os itens). Quando o
+    // desconto é 0, VlPago = Σ round2(item) = vNF — mantém o fix de troco 865/866
+    // (item a item arredondado bate com o vNF que o integrador calcula).
+    const itensCalc = dados.itens.map((item) => {
         const unidade = (item.unidade || 'UN').toUpperCase()
         const quantidade = Number(item.quantidade)
         const valorUnitario = Number(item.valorUnitario)
         const valorTotal = round2(quantidade * valorUnitario)
-        return {
-            CodProdutoServico: sanitizarCodigoProduto(item.codigo),
-            NmProduto: sanitizarNomeProduto(item.nome),
-            NCM: item.ncm || '21069090',
-            CFOP: item.cfop || 5102,
-            UnidadeComercial: unidade,
-            Quantidade: quantidade,
-            ValorUnitario: valorUnitario,
-            ValorTotal: valorTotal,
-            ValorDesconto: 0,
-            OrigemProduto: 0,
-            Imposto: {
-                // Simples Nacional sem permissão de crédito (CSOSN 102),
-                // PIS/COFINS sem incidência (CST 99), IPI não destacado (CST 99).
-                // A API calcula valores automaticamente.
-                ICMS: {
-                    CodSituacaoTributaria: normalizarCSOSN(item.csosn),
-                    modalidadeBcIcms: 0,
-                },
-                IPI: {
-                    CodEnquadramento: '999',
-                    CodSituacaoTributaria: '99',
-                    Aliquota: 0,
-                },
-                PIS: {
-                    CodSituacaoTributaria: '99',
-                    Aliquota: 0,
-                },
-                COFINS: {
-                    CodSituacaoTributaria: '99',
-                    Aliquota: 0,
-                },
-            },
-        }
+        return { item, unidade, quantidade, valorUnitario, valorTotal }
     })
-    // Total fiscal da nota = soma dos itens já arredondados (= vNF do integrador).
-    const valorTotalNota = round2(produtos.reduce((s, p) => s + p.ValorTotal, 0))
+    const valorBruto = round2(itensCalc.reduce((s, x) => s + x.valorTotal, 0))
+    const descontoTotal = Math.min(Math.max(Number(dados.desconto) || 0, 0), valorBruto)
+    const descontosItem = distribuirDesconto(descontoTotal, itensCalc.map((x) => x.valorTotal))
+    const valorPago = round2(valorBruto - descontosItem.reduce((s, v) => s + v, 0))
 
     const payload = {
         // ─── Identificação ─────────────────────────────────
@@ -200,7 +171,42 @@ export async function emitirNFCe(dados: DadosNFCe): Promise<ResultadoNFCe> {
             : null,
 
         // ─── Produtos ───────────────────────────────────────
-        Produtos: produtos,
+        Produtos: itensCalc.map(({ item, unidade, quantidade, valorUnitario, valorTotal }, i) => {
+            return {
+                CodProdutoServico: sanitizarCodigoProduto(item.codigo),
+                NmProduto: sanitizarNomeProduto(item.nome),
+                NCM: item.ncm || '21069090',
+                CFOP: item.cfop || 5102,
+                UnidadeComercial: unidade,
+                Quantidade: quantidade,
+                ValorUnitario: valorUnitario,
+                ValorTotal: valorTotal,
+                ValorDesconto: descontosItem[i],
+                OrigemProduto: 0,
+                Imposto: {
+                    // Simples Nacional sem permissão de crédito (CSOSN 102),
+                    // PIS/COFINS sem incidência (CST 99), IPI não destacado (CST 99).
+                    // A API calcula valores automaticamente.
+                    ICMS: {
+                        CodSituacaoTributaria: normalizarCSOSN(item.csosn),
+                        modalidadeBcIcms: 0,
+                    },
+                    IPI: {
+                        CodEnquadramento: '999',
+                        CodSituacaoTributaria: '99',
+                        Aliquota: 0,
+                    },
+                    PIS: {
+                        CodSituacaoTributaria: '99',
+                        Aliquota: 0,
+                    },
+                    COFINS: {
+                        CodSituacaoTributaria: '99',
+                        Aliquota: 0,
+                    },
+                },
+            }
+        }),
 
         // ─── Pagamentos ─────────────────────────────────────
         Pagamentos: [
@@ -208,9 +214,10 @@ export async function emitirNFCe(dados: DadosNFCe): Promise<ResultadoNFCe> {
                 IndicadorPagamento: 0,
                 Desconto: 0,
                 FormaPagamento: mapearFormaPagamento(dados.formaPagamento),
-                // VlPago = total fiscal (Σ itens arredondados) = vNF. Garante
-                // vPag ≡ vNF e elimina a rejeição de troco (865/866).
-                VlPago: valorTotalNota,
+                // VlPago = bruto − desconto rateado nos itens (= total líquido da
+                // nota). Com desconto 0, equivale a Σ round2(itens) = vNF, mantendo
+                // o fix de troco 865/866.
+                VlPago: valorPago,
                 VlTroco: 0,
                 TipoIntegracao: false,
             },

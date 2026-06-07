@@ -6,12 +6,14 @@ import { toast } from 'sonner'
 import {
     Search, Plus, Minus, Trash2, ShoppingCart, Package,
     Banknote, Smartphone, CreditCard, X, Zap, Lock, CheckCircle2,
-    Receipt, AlertTriangle, RefreshCw, Printer, Scale, Copy,
+    Receipt, AlertTriangle, RefreshCw, Printer, Scale, Copy, BadgePercent,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency, unformatCPF, isValidCPF } from '@/lib/formatters'
 import type { Produto } from '@/lib/types'
 import CpfNotaInput from '@/components/shared/CpfNotaInput'
+import DescontoModal from '@/components/shared/DescontoModal'
+import { round2 } from '@/lib/desconto'
 import { QRCodeSVG } from 'qrcode.react'
 import { gerarPixCopiaECola, PIX_RECEBEDOR } from '@/lib/pix'
 import DanfeNFCePrint from '@/components/caixa/DanfeNFCePrint'
@@ -60,7 +62,8 @@ interface NfceInfo {
 
 interface ReciboFinal {
     pedidoId: string
-    total: number
+    total: number          // total LÍQUIDO (já com desconto)
+    desconto: number       // desconto concedido (R$)
     troco: number
     formaPagamento: FormaPagamento
     itensSnapshot: CartItem[]
@@ -111,6 +114,7 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                 codigo: i.codigo ?? null,
             })),
             total: r.total,
+            desconto: r.desconto,
             valorPago: r.total + r.troco,
             troco: r.troco,
             formaPagamentoLabel: FORMA_LABEL[r.formaPagamento],
@@ -125,8 +129,11 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
 
     const [modalPagamento, setModalPagamento] = useState(false)
     const [modalPix, setModalPix] = useState(false)
+    const [modalDesconto, setModalDesconto] = useState(false)
     const [formaPagamento, setFormaPagamento] = useState<FormaPagamento>('dinheiro')
     const [valorRecebido, setValorRecebido] = useState('')
+    // Desconto da venda (R$). Modal R$/%.
+    const [descontoVenda, setDescontoVenda] = useState(0)
     const [processando, setProcessando] = useState(false)
 
     // ── Pesagem ──
@@ -254,10 +261,13 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
         setCartItemEmReweigh(null)
     }
 
-    const total = carrinho.reduce((acc, i) => acc + i.preco * i.quantidade, 0)
+    const total = round2(carrinho.reduce((acc, i) => acc + i.preco * i.quantidade, 0))
+    // Desconto nunca passa do total (clamp defensivo — modal já limita).
+    const descontoAplicado = Math.min(round2(descontoVenda), total)
+    const totalLiquido = round2(Math.max(0, total - descontoAplicado))
     const valorRecebidoNum = parseFloat(valorRecebido.replace(',', '.')) || 0
-    const troco = formaPagamento === 'dinheiro' ? Math.max(0, valorRecebidoNum - total) : 0
-    const valorInsuficiente = formaPagamento === 'dinheiro' && valorRecebidoNum < total
+    const troco = formaPagamento === 'dinheiro' ? Math.max(0, valorRecebidoNum - totalLiquido) : 0
+    const valorInsuficiente = formaPagamento === 'dinheiro' && valorRecebidoNum < totalLiquido
 
     // ── Atalho ESC fecha modal ────────────────────────────────────────
     useEffect(() => {
@@ -275,6 +285,12 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
             void imprimirAuto(recibo)
         }
     }, [recibo, imprimirAuto])
+
+    // Carrinho vazio (Limpar / remover último item) zera o desconto — evita
+    // que um desconto antigo "grude" e seja reaplicado numa venda nova.
+    useEffect(() => {
+        if (carrinho.length === 0 && descontoVenda !== 0) setDescontoVenda(0)
+    }, [carrinho.length, descontoVenda])
 
     // ── Caixa fechado: tela bloqueadora (após hooks p/ respeitar Rules of Hooks) ──
     if (!caixaAberto) {
@@ -307,6 +323,7 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
         forma: FormaPagamento,
         itens: CartItem[],
         cpf?: string,
+        desconto = 0,
     ): Promise<NfceInfo> {
         try {
             const cpfDigits = cpf ? unformatCPF(cpf) : ''
@@ -317,7 +334,9 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     pedidoId,
+                    // valorTotal já é o LÍQUIDO; o desconto vai à parte pro rateio por item.
                     total: valorTotal,
+                    desconto,
                     formaPagamento: forma,
                     cpfCliente: cpfClienteEnvio,
                     itens: itens.map((i) => ({
@@ -358,6 +377,7 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
             recibo.formaPagamento,
             recibo.itensSnapshot,
             recibo.cpfCliente,
+            recibo.desconto,
         )
         setRecibo({ ...recibo, nfce })
     }
@@ -372,14 +392,16 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
 
         setProcessando(true)
 
-        const valorPago = formaPagamento === 'dinheiro' ? valorRecebidoNum : total
+        const valorPago = formaPagamento === 'dinheiro' ? valorRecebidoNum : totalLiquido
 
+        // p_total = BRUTO (soma dos itens); a RPC aplica p_desconto e grava o líquido.
         const { data, error } = await supabase.rpc('create_venda_rapida', {
             p_vendedor_id: vendedorId,
             p_total: total,
             p_forma_pagamento: formaPagamento,
             p_valor_pago: valorPago,
             p_cliente_id: null,
+            p_desconto: descontoAplicado,
             p_itens: carrinho.map((i) => ({
                 produto_id: i.produto_id,
                 quantidade: i.quantidade,
@@ -400,20 +422,22 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
 
         const pedidoId = (data as any)?.pedido_id as string
         const trocoFinal = (data as any)?.troco ?? 0
-        const totalSnapshot = total
+        const liquidoSnapshot = totalLiquido
+        const descontoSnapshot = descontoAplicado
         const formaSnapshot = formaPagamento
         const itensSnapshot = carrinho
 
         const cpfSnapshot = cpfNota
 
-        toast.success(`Venda finalizada! Total: ${formatCurrency(totalSnapshot)}`)
+        toast.success(`Venda finalizada! Total: ${formatCurrency(liquidoSnapshot)}`)
 
         // Emite NFC-e (não cancela a venda se falhar)
-        const nfce = await emitirNFCe(pedidoId, totalSnapshot, formaSnapshot, itensSnapshot, cpfSnapshot)
+        const nfce = await emitirNFCe(pedidoId, liquidoSnapshot, formaSnapshot, itensSnapshot, cpfSnapshot, descontoSnapshot)
 
         setRecibo({
             pedidoId,
-            total: totalSnapshot,
+            total: liquidoSnapshot,
+            desconto: descontoSnapshot,
             troco: trocoFinal,
             formaPagamento: formaSnapshot,
             itensSnapshot,
@@ -426,6 +450,7 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
         setModalPix(false)
         setValorRecebido('')
         setFormaPagamento('dinheiro')
+        setDescontoVenda(0)
         setCpfNota('')
         setProcessando(false)
     }
@@ -444,6 +469,7 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                         produto: { nome: i.nome, codigo: i.codigo ?? null },
                     }))}
                     total={recibo.total}
+                    desconto={recibo.desconto}
                     valorPago={recibo.total + recibo.troco}
                     troco={recibo.troco}
                     formaPagamentoLabel={FORMA_LABEL[recibo.formaPagamento]}
@@ -666,6 +692,19 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                             {/* CPF na nota (opcional) — antes da forma de pagamento */}
                             <CpfNotaInput value={cpfNota} onChange={setCpfNota} />
 
+                            {/* Desconto — botão sempre acessível, destacado quando aplicado */}
+                            <button
+                                onClick={() => setModalDesconto(true)}
+                                className={`w-full py-2.5 rounded-xl border-2 border-dashed text-sm font-bold flex items-center justify-center gap-1.5 transition-colors active:scale-[0.99] ${descontoAplicado > 0
+                                    ? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                                    : 'border-gray-200 text-gray-500 hover:border-amber-300 hover:text-amber-600'}`}
+                            >
+                                <BadgePercent className="w-4 h-4" />
+                                {descontoAplicado > 0
+                                    ? `Desconto aplicado: ${formatCurrency(descontoAplicado)} · alterar`
+                                    : 'Aplicar desconto'}
+                            </button>
+
                             <div>
                                 <p className="text-sm font-semibold text-gray-700 mb-2">Forma de Pagamento</p>
                                 <div className="grid grid-cols-2 gap-2">
@@ -706,16 +745,30 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                                                 {valorInsuficiente ? 'Valor insuficiente' : 'Troco'}
                                             </span>
                                             <span className={`text-xl font-extrabold ${valorInsuficiente ? 'text-red-700' : 'text-emerald-700'}`}>
-                                                {formatCurrency(valorInsuficiente ? total - valorRecebidoNum : troco)}
+                                                {formatCurrency(valorInsuficiente ? totalLiquido - valorRecebidoNum : troco)}
                                             </span>
                                         </div>
                                     )}
                                 </div>
                             )}
 
-                            <div className="pt-2 border-t border-gray-100 flex items-center justify-between">
-                                <span className="text-sm text-gray-500">Total a Pagar</span>
-                                <span className="text-2xl font-extrabold text-primary">{formatCurrency(total)}</span>
+                            <div className="pt-2 border-t border-gray-100 space-y-1">
+                                {descontoAplicado > 0 && (
+                                    <>
+                                        <div className="flex items-center justify-between text-sm">
+                                            <span className="text-gray-400">Subtotal</span>
+                                            <span className="font-semibold text-gray-500 line-through">{formatCurrency(total)}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between text-sm">
+                                            <span className="text-amber-600 font-medium">Desconto</span>
+                                            <span className="font-bold text-amber-600">- {formatCurrency(descontoAplicado)}</span>
+                                        </div>
+                                    </>
+                                )}
+                                <div className="flex items-center justify-between">
+                                    <span className="text-sm text-gray-500">Total a Pagar</span>
+                                    <span className="text-2xl font-extrabold text-primary">{formatCurrency(totalLiquido)}</span>
+                                </div>
                             </div>
                         </div>
 
@@ -754,7 +807,7 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                         </div>
                         <div className="p-6 flex flex-col items-center">
                             {(() => {
-                                const pixPayload = gerarPixCopiaECola({ valor: total })
+                                const pixPayload = gerarPixCopiaECola({ valor: totalLiquido })
                                 return (
                                     <>
                                         <div className="bg-white p-3 rounded-xl border-2 border-emerald-100 shadow-sm mb-4 inline-block">
@@ -766,7 +819,10 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                                             />
                                         </div>
                                         <p className="text-sm text-gray-500 mb-1">Total a Pagar</p>
-                                        <p className="text-3xl font-black text-gray-900 mb-1">{formatCurrency(total)}</p>
+                                        <p className="text-3xl font-black text-gray-900 mb-1">{formatCurrency(totalLiquido)}</p>
+                                        {descontoAplicado > 0 && (
+                                            <p className="text-xs text-amber-600 font-semibold mb-1">desconto de {formatCurrency(descontoAplicado)} aplicado</p>
+                                        )}
                                         <p className="text-xs text-gray-400 mb-4">{PIX_RECEBEDOR.nome}</p>
 
                                         <button
@@ -820,6 +876,12 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                             <h2 className="text-lg font-bold">Venda Finalizada!</h2>
                         </div>
                         <div className="px-6 py-5 space-y-3">
+                            {recibo.desconto > 0 && (
+                                <div className="flex items-center justify-between text-sm">
+                                    <span className="text-amber-600 font-medium flex items-center gap-1.5"><BadgePercent className="w-4 h-4" /> Desconto</span>
+                                    <span className="font-bold text-amber-600">- {formatCurrency(recibo.desconto)}</span>
+                                </div>
+                            )}
                             <div className="flex items-center justify-between text-sm">
                                 <span className="text-gray-500">Total da venda</span>
                                 <span className="font-bold text-gray-800">{formatCurrency(recibo.total)}</span>
@@ -920,6 +982,16 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* ── Modal de Desconto ── */}
+            {modalDesconto && (
+                <DescontoModal
+                    totalBruto={total}
+                    descontoAtual={descontoAplicado}
+                    onAplicar={(d) => setDescontoVenda(d)}
+                    onClose={() => setModalDesconto(false)}
+                />
             )}
 
             {/* ── Modal de Pesagem ── */}

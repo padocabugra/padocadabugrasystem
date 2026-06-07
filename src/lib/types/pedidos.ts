@@ -35,7 +35,8 @@ export interface Pedido {
     comanda_id: string | null        // FK → comandas.id
     cliente_id: string | null
     vendedor_id: string | null       // coluna real: vendedor_id
-    total: number                    // coluna real: total (não valor_total)
+    total: number                    // coluna real: total — LÍQUIDO (já com desconto)
+    desconto?: number                // desconto concedido no pagamento (R$); default 0
     forma_pagamento: FormaPagamento | null
     status: StatusPedido
     tipo_pedido: TipoPedido           // 'local' | 'delivery'

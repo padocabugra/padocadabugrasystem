@@ -20,7 +20,8 @@ interface ItemDanfe {
 interface Props {
     chaveAcesso: string
     itens: ItemDanfe[]
-    total: number
+    total: number          // total LÍQUIDO (já com desconto)
+    desconto?: number      // desconto concedido (R$)
     valorPago: number
     troco: number
     formaPagamentoLabel: string
@@ -55,6 +56,7 @@ export default function DanfeNFCePrint({
     chaveAcesso,
     itens,
     total,
+    desconto = 0,
     valorPago,
     troco,
     formaPagamentoLabel,
@@ -114,7 +116,19 @@ export default function DanfeNFCePrint({
 
             <div style={{ borderTop: '1px dashed black', margin: '2mm 0' }} />
 
-            {/* Totais */}
+            {/* Totais — Subtotal/Desconto aparecem só quando houve desconto */}
+            {desconto > 0 && (
+                <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '8pt' }}>
+                        <span>Subtotal</span>
+                        <span>{formatCurrency(total + desconto)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '8pt' }}>
+                        <span>Desconto</span>
+                        <span>- {formatCurrency(desconto)}</span>
+                    </div>
+                </>
+            )}
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10pt', fontWeight: 'bold' }}>
                 <span>TOTAL R$</span>
                 <span>{formatCurrency(total)}</span>
