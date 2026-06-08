@@ -30,12 +30,6 @@ function ModalAjuste({
     const [tipo, setTipo] = useState<'entrada' | 'saida' | 'ajuste'>('entrada')
     const [quantidade, setQuantidade] = useState('')
     const [observacao, setObservacao] = useState('')
-    // Dados de compra — só usados em 'entrada' (controle do que entra na empresa)
-    const [numeroNF, setNumeroNF] = useState('')
-    // Data local (en-CA => YYYY-MM-DD no fuso do navegador) — evita o off-by-one
-    // do toISOString() à noite em Campo Grande (UTC-4).
-    const [dataCompra, setDataCompra] = useState(() => new Date().toLocaleDateString('en-CA'))
-    const [fornecedor, setFornecedor] = useState('')
     const [loading, setLoading] = useState(false)
     const supabase = createClient()
 
@@ -61,15 +55,11 @@ function ModalAjuste({
                 .eq('id', produto.id)
             if (prodErr) throw prodErr
 
-            const ehEntrada = tipo === 'entrada'
             const { error: movErr } = await supabase.from('movimentacao_estoque').insert({
                 produto_id: produto.id,
                 tipo,
                 quantidade: qtd,
                 observacao: observacao || null,
-                numero_nota_fiscal: ehEntrada ? (numeroNF.trim() || null) : null,
-                data_compra: ehEntrada ? (dataCompra || null) : null,
-                fornecedor: ehEntrada ? (fornecedor.trim() || null) : null,
             })
             if (movErr) console.error('[ESTOQUE] Falha ao registrar movimentação:', movErr.message)
 
@@ -84,11 +74,6 @@ function ModalAjuste({
                     estoqueAnterior: estoqueDisponivel,
                     estoqueNovo: novoEstoque,
                     observacao: observacao || undefined,
-                    ...(ehEntrada ? {
-                        numeroNotaFiscal: numeroNF.trim() || undefined,
-                        dataCompra: dataCompra || undefined,
-                        fornecedor: fornecedor.trim() || undefined,
-                    } : {}),
                 },
             })
 
@@ -147,43 +132,6 @@ function ModalAjuste({
                             </span>
                         </div>
                     </div>
-                    {/* Dados da compra — só na ENTRADA (controle do que entra na empresa) */}
-                    {tipo === 'entrada' && (
-                        <div className="space-y-3 rounded-xl border border-emerald-100 bg-emerald-50/50 p-3">
-                            <p className="text-[11px] font-bold text-emerald-700 uppercase tracking-wide">Dados da compra</p>
-                            <div className="grid grid-cols-2 gap-2">
-                                <div>
-                                    <label className="text-xs font-semibold text-gray-600">Nº Nota Fiscal</label>
-                                    <input
-                                        type="text"
-                                        placeholder="Ex: 001234"
-                                        value={numeroNF}
-                                        onChange={(e) => setNumeroNF(e.target.value)}
-                                        className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-200 outline-none"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="text-xs font-semibold text-gray-600">Data da Compra</label>
-                                    <input
-                                        type="date"
-                                        value={dataCompra}
-                                        onChange={(e) => setDataCompra(e.target.value)}
-                                        className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-200 outline-none"
-                                    />
-                                </div>
-                            </div>
-                            <div>
-                                <label className="text-xs font-semibold text-gray-600">Fornecedor</label>
-                                <input
-                                    type="text"
-                                    placeholder="Nome do fornecedor"
-                                    value={fornecedor}
-                                    onChange={(e) => setFornecedor(e.target.value)}
-                                    className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-200 outline-none"
-                                />
-                            </div>
-                        </div>
-                    )}
                     <div>
                         <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Observação (opcional)</label>
                         <input
