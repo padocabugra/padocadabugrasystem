@@ -3,8 +3,10 @@
 import { useEffect, useState } from 'react'
 import { useForm, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { X, Loader2, Save, Trash2, ChevronDown, ChevronRight, ScanLine, CheckCircle2, AlertTriangle } from 'lucide-react'
+import { X, Loader2, Save, Trash2, ChevronDown, ChevronRight, ScanLine, CheckCircle2, AlertTriangle, Truck } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { toast } from 'sonner'
+import { registrarAuditLog } from '@/lib/audit-log'
 import { isValidEAN13 } from '@/lib/formatters'
 import {
     produtoSchema,
@@ -29,6 +31,14 @@ export default function ModalProduto({
     produtoToEdit,
 }: ModalProdutoProps) {
     const [fiscalAberto, setFiscalAberto] = useState(false)
+
+    // Dar Entrada (opcional) — captura NF/fornecedor/data ao adicionar estoque.
+    // Esses campos NÃO pertencem à tabela produtos (vão p/ movimentacao_estoque),
+    // por isso ficam como estado local, fora do schema do formulário.
+    const [darEntrada, setDarEntrada] = useState(false)
+    const [numeroNF, setNumeroNF] = useState('')
+    const [dataCompra, setDataCompra] = useState(() => new Date().toLocaleDateString('en-CA'))
+    const [fornecedor, setFornecedor] = useState('')
 
     const {
         register,
@@ -105,6 +115,12 @@ export default function ModalProduto({
                 csosn: '0102',
             })
         }
+
+        // Entrada com NF — sempre começa desligada e limpa ao (re)abrir o modal.
+        setDarEntrada(false)
+        setNumeroNF('')
+        setDataCompra(new Date().toLocaleDateString('en-CA'))
+        setFornecedor('')
     }, [produtoToEdit, reset, isOpen])
 
     async function onSubmit(data: ProdutoFormData) {
@@ -127,6 +143,10 @@ export default function ModalProduto({
                 csosn: data.csosn || null,
             }
 
+            const estoqueAnterior = produtoToEdit ? Number(produtoToEdit.estoque_atual) : 0
+            const novoEstoque = Number(data.estoque_atual)
+            let produtoId = produtoToEdit?.id
+
             if (produtoToEdit) {
                 const { error } = await supabase
                     .from('produtos')
@@ -134,8 +154,57 @@ export default function ModalProduto({
                     .eq('id', produtoToEdit.id)
                 if (error) throw error
             } else {
-                const { error } = await supabase.from('produtos').insert([payload])
+                const { data: novo, error } = await supabase
+                    .from('produtos')
+                    .insert([payload])
+                    .select('id')
+                    .single()
                 if (error) throw error
+                produtoId = novo?.id
+            }
+
+            // ── Dar Entrada (opcional) ────────────────────────────────────
+            // Registra a entrada da mercadoria com os dados da nota fiscal. A
+            // quantidade da entrada = quanto o estoque AUMENTOU (produto novo =
+            // estoque inicial; edição = o acréscimo), pra não contar em dobro.
+            if (darEntrada && produtoId) {
+                const qtdEntrada = Number((novoEstoque - estoqueAnterior).toFixed(3))
+                if (qtdEntrada > 0) {
+                    const { error: movErr } = await supabase.from('movimentacao_estoque').insert({
+                        produto_id: produtoId,
+                        tipo: 'entrada',
+                        quantidade: qtdEntrada,
+                        observacao: null,
+                        numero_nota_fiscal: numeroNF.trim() || null,
+                        data_compra: dataCompra || null,
+                        fornecedor: fornecedor.trim() || null,
+                    })
+                    if (movErr) {
+                        // Produto salvou, mas a entrada/NF não — avisa de verdade (não engole).
+                        toast.warning('Produto salvo, mas a entrada da nota não foi registrada.', {
+                            description: movErr.message,
+                        })
+                    } else {
+                        registrarAuditLog({
+                            acao: 'estoque.entrada',
+                            entidade: 'produtos',
+                            entidade_id: produtoId,
+                            detalhes: {
+                                produto: data.nome,
+                                tipo: 'entrada',
+                                quantidade: qtdEntrada,
+                                estoqueAnterior,
+                                estoqueNovo: novoEstoque,
+                                numeroNotaFiscal: numeroNF.trim() || undefined,
+                                dataCompra: dataCompra || undefined,
+                                fornecedor: fornecedor.trim() || undefined,
+                            },
+                        })
+                        toast.success('Entrada registrada com a nota fiscal.')
+                    }
+                } else {
+                    toast.info('Nenhuma entrada registrada: o estoque não aumentou.')
+                }
             }
 
             onSuccess()
@@ -303,6 +372,67 @@ export default function ModalProduto({
                                 ))}
                             </select>
                         </div>
+                    </div>
+
+                    {/* ── Dar Entrada com Nota Fiscal (opcional) ── */}
+                    <div className="border border-emerald-200 rounded-xl overflow-hidden">
+                        <label className="flex items-center justify-between gap-3 px-4 py-3 bg-emerald-50/60 cursor-pointer select-none">
+                            <span className="text-sm font-semibold text-emerald-800 flex items-center gap-2">
+                                <Truck className="w-4 h-4" />
+                                Dar entrada com Nota Fiscal
+                                <span className="text-[11px] font-normal text-emerald-700/70">(opcional)</span>
+                            </span>
+                            <div className="relative">
+                                <input
+                                    type="checkbox"
+                                    className="sr-only peer"
+                                    checked={darEntrada}
+                                    onChange={(e) => setDarEntrada(e.target.checked)}
+                                />
+                                <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-emerald-100 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                            </div>
+                        </label>
+
+                        {darEntrada && (
+                            <div className="p-4 space-y-3 border-t border-emerald-100 bg-emerald-50/30">
+                                <p className="text-[11px] text-emerald-700/80 leading-snug">
+                                    {produtoToEdit
+                                        ? 'Registra uma entrada com a nota na quantidade que o estoque aumentar (a diferença em relação ao Estoque Atual acima).'
+                                        : 'Registra a entrada do estoque inicial (acima) com os dados da nota fiscal.'}
+                                </p>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-semibold text-gray-600">Nº Nota Fiscal</label>
+                                        <input
+                                            type="text"
+                                            placeholder="Ex: 001234"
+                                            value={numeroNF}
+                                            onChange={(e) => setNumeroNF(e.target.value)}
+                                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-200 outline-none"
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-semibold text-gray-600">Data da Compra</label>
+                                        <input
+                                            type="date"
+                                            value={dataCompra}
+                                            onChange={(e) => setDataCompra(e.target.value)}
+                                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-200 outline-none"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-semibold text-gray-600">Fornecedor</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Nome do fornecedor"
+                                        value={fornecedor}
+                                        onChange={(e) => setFornecedor(e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-200 outline-none"
+                                    />
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {/* Linha 4: Tipo de Produto */}
