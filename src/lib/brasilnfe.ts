@@ -126,6 +126,56 @@ export async function emitirNFCe(dados: DadosNFCe): Promise<ResultadoNFCe> {
 
     const dataHora = dataEmissaoLocal()
 
+    // ─── Itens e total fiscal ───────────────────────────────
+    // VlPago PRECISA bater com o vNF que a SEFAZ calcula item a item
+    // (Σ round2(qtd × valorUnitário)). Antes o pagamento vinha de dados.total,
+    // que é somado SEM arredondar por item (CarrinhoLateral) → diverge em
+    // centavos em itens por peso/kg e dispara rejeição de troco (865/866).
+    // Derivar o pagamento da MESMA fonte dos itens garante vPag ≡ vNF.
+    const round2 = (n: number) => Math.round(n * 100) / 100
+    const produtos = dados.itens.map((item) => {
+        const unidade = (item.unidade || 'UN').toUpperCase()
+        const quantidade = Number(item.quantidade)
+        const valorUnitario = Number(item.valorUnitario)
+        const valorTotal = round2(quantidade * valorUnitario)
+        return {
+            CodProdutoServico: sanitizarCodigoProduto(item.codigo),
+            NmProduto: sanitizarNomeProduto(item.nome),
+            NCM: item.ncm || '21069090',
+            CFOP: item.cfop || 5102,
+            UnidadeComercial: unidade,
+            Quantidade: quantidade,
+            ValorUnitario: valorUnitario,
+            ValorTotal: valorTotal,
+            ValorDesconto: 0,
+            OrigemProduto: 0,
+            Imposto: {
+                // Simples Nacional sem permissão de crédito (CSOSN 102),
+                // PIS/COFINS sem incidência (CST 99), IPI não destacado (CST 99).
+                // A API calcula valores automaticamente.
+                ICMS: {
+                    CodSituacaoTributaria: normalizarCSOSN(item.csosn),
+                    modalidadeBcIcms: 0,
+                },
+                IPI: {
+                    CodEnquadramento: '999',
+                    CodSituacaoTributaria: '99',
+                    Aliquota: 0,
+                },
+                PIS: {
+                    CodSituacaoTributaria: '99',
+                    Aliquota: 0,
+                },
+                COFINS: {
+                    CodSituacaoTributaria: '99',
+                    Aliquota: 0,
+                },
+            },
+        }
+    })
+    // Total fiscal da nota = soma dos itens já arredondados (= vNF do integrador).
+    const valorTotalNota = round2(produtos.reduce((s, p) => s + p.ValorTotal, 0))
+
     const payload = {
         // ─── Identificação ─────────────────────────────────
         TipoAmbiente: ambiente,
@@ -150,46 +200,7 @@ export async function emitirNFCe(dados: DadosNFCe): Promise<ResultadoNFCe> {
             : null,
 
         // ─── Produtos ───────────────────────────────────────
-        Produtos: dados.itens.map((item) => {
-            const unidade = (item.unidade || 'UN').toUpperCase()
-            const quantidade = Number(item.quantidade)
-            const valorUnitario = Number(item.valorUnitario)
-            const valorTotal = Math.round(quantidade * valorUnitario * 100) / 100
-            return {
-                CodProdutoServico: sanitizarCodigoProduto(item.codigo),
-                NmProduto: sanitizarNomeProduto(item.nome),
-                NCM: item.ncm || '21069090',
-                CFOP: item.cfop || 5102,
-                UnidadeComercial: unidade,
-                Quantidade: quantidade,
-                ValorUnitario: valorUnitario,
-                ValorTotal: valorTotal,
-                ValorDesconto: 0,
-                OrigemProduto: 0,
-                Imposto: {
-                    // Simples Nacional sem permissão de crédito (CSOSN 102),
-                    // PIS/COFINS sem incidência (CST 99), IPI não destacado (CST 99).
-                    // A API calcula valores automaticamente.
-                    ICMS: {
-                        CodSituacaoTributaria: normalizarCSOSN(item.csosn),
-                        modalidadeBcIcms: 0,
-                    },
-                    IPI: {
-                        CodEnquadramento: '999',
-                        CodSituacaoTributaria: '99',
-                        Aliquota: 0,
-                    },
-                    PIS: {
-                        CodSituacaoTributaria: '99',
-                        Aliquota: 0,
-                    },
-                    COFINS: {
-                        CodSituacaoTributaria: '99',
-                        Aliquota: 0,
-                    },
-                },
-            }
-        }),
+        Produtos: produtos,
 
         // ─── Pagamentos ─────────────────────────────────────
         Pagamentos: [
@@ -197,7 +208,9 @@ export async function emitirNFCe(dados: DadosNFCe): Promise<ResultadoNFCe> {
                 IndicadorPagamento: 0,
                 Desconto: 0,
                 FormaPagamento: mapearFormaPagamento(dados.formaPagamento),
-                VlPago: dados.total,
+                // VlPago = total fiscal (Σ itens arredondados) = vNF. Garante
+                // vPag ≡ vNF e elimina a rejeição de troco (865/866).
+                VlPago: valorTotalNota,
                 VlTroco: 0,
                 TipoIntegracao: false,
             },
