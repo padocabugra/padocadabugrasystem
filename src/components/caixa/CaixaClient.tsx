@@ -7,7 +7,8 @@ import { toast } from 'sonner'
 import {
     Search, Receipt, Banknote, CreditCard, Smartphone, ArrowDownCircle,
     ArrowUpCircle, ChevronRight, RefreshCw, CheckCircle2, X,
-    DollarSign, Clock, AlertTriangle, Hash, User, Star, Printer, Lock, Copy, BadgePercent
+    DollarSign, Clock, AlertTriangle, Hash, User, Star, Printer, Lock, Copy, BadgePercent,
+    Loader2, KeyRound, Eye, EyeOff, Ban
 } from 'lucide-react'
 import { dataHoraLocalVisual, getAgoraUTC } from '@/lib/timezone'
 import { unformatCPF, isValidCPF } from '@/lib/formatters'
@@ -293,10 +294,23 @@ export default function CaixaClient({
     const [processandoCancelamento, setProcessandoCancelamento] = useState(false)
     const [carregandoPedidos, setCarregandoPedidos] = useState(false)
 
+    // Modal de cancelamento (conta inteira OU itens específicos), liberado só
+    // com a senha de exclusão do ADM. O caixa nunca vê/sabe a senha.
+    const [modalCancelar, setModalCancelar] = useState(false)
+    const [modoCancelamento, setModoCancelamento] = useState<'conta' | 'itens'>('conta')
+    const [itensParaCancelar, setItensParaCancelar] = useState<Set<string>>(new Set())
+    const [senhaCancelamento, setSenhaCancelamento] = useState('')
+    const [revelarSenhaCancel, setRevelarSenhaCancel] = useState(false)
+
     // Modal Cupom Digital
     const [reciboAtual, setReciboAtual] = useState<DadosRecibo | null>(null)
     // Status da impressão automática do cupom: idle (sem tentar) | ok | falha
     const [statusImpressao, setStatusImpressao] = useState<'idle' | 'ok' | 'falha'>('idle')
+    // NFC-e emitida em segundo plano: a venda fecha na hora e a nota sai depois,
+    // sem travar o caixa esperando a SEFAZ. Guarda o pedidoId do recibo cuja nota
+    // está sendo emitida (null = nenhuma) — id em vez de bool pra não confundir se
+    // duas vendas seguidas estiverem emitindo ao mesmo tempo.
+    const [emitindoNfceId, setEmitindoNfceId] = useState<string | null>(null)
     // Guard: garante auto-impressão UMA vez por recibo (evita reimpressão quando a
     // identidade da impressora muda — reaquisição/retry — e recria os callbacks).
     const autoPrintReciboRef = useRef<DadosRecibo | null>(null)
@@ -588,8 +602,31 @@ export default function CaixaClient({
         setReciboAtual({ ...reciboAtual, pedidos: atualizados })
     }
 
+    // Emite a NFC-e da conta em SEGUNDO PLANO (não trava a finalização). Quando a
+    // SEFAZ responde, anexa a nota ao recibo — se ele ainda for o que está na tela.
+    // O useEffect de auto-impressão dispara sozinho ao ver a nota OK.
+    async function emitirNotaConta(
+        pedidoConta: PedidoPDV,
+        forma: FormaPagamento,
+        cpf: string,
+        idsConta: string[],
+        descontoEfetivo: number,
+        reciboPedidoId: string,
+    ) {
+        setEmitindoNfceId(reciboPedidoId)
+        try {
+            const nfceConta = await emitirNFCe(pedidoConta, forma, cpf, idsConta, descontoEfetivo)
+            setReciboAtual((prev) => {
+                if (!prev || prev.pedidos[0]?.pedidoId !== reciboPedidoId) return prev
+                return { ...prev, pedidos: prev.pedidos.map((p) => ({ ...p, nfce: nfceConta })) }
+            })
+        } finally {
+            setEmitindoNfceId((id) => (id === reciboPedidoId ? null : id))
+        }
+    }
+
     // Finaliza a CONTA inteira: paga todos os pedidos agrupados de uma vez.
-    // Cada pedido segue baixando estoque e emitindo sua NFC-e (inalterado).
+    // A NFC-e é emitida em segundo plano (ver emitirNotaConta).
     async function handleFinalizarVenda() {
         if (!contaSelecionada || !aberturaHoje) return
 
@@ -645,26 +682,25 @@ export default function CaixaClient({
                 toast.warning(`${falhasFinalizacao} pedido(s) da conta seguem abertos e não foram cobrados.`)
             }
 
-            // 2) UMA NFC-e pra conta inteira: combina os itens de todos os pedidos
-            //    pagos num único documento fiscal => um único cupom por cliente.
-            //    O desconto efetivo é só o dos pedidos que realmente foram pagos.
+            // 2) Recibo da conta — montado JÁ, sem esperar a NFC-e. A nota da conta
+            //    (um cupom único com os itens de todos os pedidos pagos) é emitida
+            //    em SEGUNDO PLANO; o desconto efetivo é só o dos pedidos pagos.
             const itensConta = pedidosPagos.flatMap((p) => p.itens_pedido)
             const brutoPago = round2(pedidosPagos.reduce((s, p) => s + p.total, 0))
             const descontoEfetivo = round2(descontosPagos.reduce((s, d) => s + d, 0))
             const liquidoPago = round2(brutoPago - descontoEfetivo)
             const idsConta = pedidosPagos.map((p) => p.id)
+            const reciboPedidoId = pedidosPagos[0].id
             // pedidoConta.total = líquido (é o que a NFC-e envia como total).
             const pedidoConta: PedidoPDV = { ...pedidosPagos[0], total: liquidoPago, itens_pedido: itensConta }
-            // NFC-e — emite após pagamento confirmado. Falha NÃO cancela a venda.
-            const nfceConta = await emitirNFCe(pedidoConta, formaPagamento, cpfNota, idsConta, descontoEfetivo)
 
             const reciboPedidos: ReciboPedido[] = [{
-                pedidoId: pedidosPagos[0].id,
+                pedidoId: reciboPedidoId,
                 pedidoIds: idsConta,
                 itens: itensConta,
                 total: liquidoPago,
                 desconto: descontoEfetivo,
-                nfce: nfceConta,
+                nfce: undefined,            // emitida logo a seguir, em segundo plano
                 cpfCliente: cpfNota,
             }]
 
@@ -715,6 +751,10 @@ export default function CaixaClient({
                 usuario_nome: usuarioNome,
             })
 
+            // Snapshot do que a nota precisa, ANTES de resetar os campos do form.
+            const formaNota = formaPagamento
+            const cpfParaNota = cpfNota
+
             setReciboAtual(recibo)
             setContaSelecionadaKey(null)
             setDescontoConta(0)
@@ -723,6 +763,11 @@ export default function CaixaClient({
             setCpfNota('')
             setModalPix(false)
             await carregarPedidosProntos()
+
+            // Venda já fechada na tela; a NFC-e sai em SEGUNDO PLANO. O recibo se
+            // atualiza quando a SEFAZ responde (e o cupom imprime sozinho). Isso
+            // elimina o caixa "travar" esperando a emissão da nota.
+            void emitirNotaConta(pedidoConta, formaNota, cpfParaNota, idsConta, descontoEfetivo, reciboPedidoId)
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : 'Erro desconhecido'
             toast.error('Erro ao finalizar venda: ' + msg)
@@ -731,38 +776,110 @@ export default function CaixaClient({
         }
     }
 
-    // Cancela a CONTA inteira (todos os pedidos agrupados). Em conta de 1 pedido,
-    // comporta-se como antes.
-    async function handleCancelarConta(conta: Conta) {
-        const qtd = conta.pedidos.length
-        const msg = qtd > 1
-            ? `Cancelar a conta de ${conta.label}? Os ${qtd} pedidos serão removidos do caixa e não entram nos relatórios.`
-            : 'Deseja realmente cancelar este pedido? Ele será removido do caixa e os relatórios não o contabilizarão.'
-        if (!confirm(msg)) return
+    // Abre o modal de cancelamento (conta inteira OU itens específicos). O
+    // cancelamento só é liberado com a senha de exclusão do ADM — o caixa
+    // apenas aciona o botão, nunca vê a senha.
+    function abrirModalCancelar() {
+        if (!contaSelecionada) return
+        setModoCancelamento('conta')
+        setItensParaCancelar(new Set())
+        setSenhaCancelamento('')
+        setRevelarSenhaCancel(false)
+        setModalCancelar(true)
+    }
+
+    function toggleItemCancelar(itemId: string) {
+        setItensParaCancelar((prev) => {
+            const next = new Set(prev)
+            if (next.has(itemId)) next.delete(itemId)
+            else next.add(itemId)
+            return next
+        })
+    }
+
+    // Valida a senha do ADM (RPC, sem revelar a senha) e executa o cancelamento:
+    //  • conta inteira  -> todos os pedidos viram 'cancelado';
+    //  • itens marcados -> remove o item (trigger recalcula o total do pedido);
+    //                      se um pedido ficar sem itens, ele é cancelado.
+    // Pedido 'pronto' ainda não baixou estoque (baixa só na entrega), então não
+    // há nada a estornar.
+    async function confirmarCancelamento() {
+        if (!contaSelecionada) return
+        if (!senhaCancelamento.trim()) {
+            toast.error('Informe a senha de exclusão do administrador.')
+            return
+        }
+        if (modoCancelamento === 'itens' && itensParaCancelar.size === 0) {
+            toast.error('Selecione ao menos um item para cancelar.')
+            return
+        }
+
         setProcessandoCancelamento(true)
         try {
-            const ids = conta.pedidos.map((p) => p.id)
-            const { error } = await supabase
-                .from('pedidos')
-                .update({ status: 'cancelado' })
-                .in('id', ids)
-
-            if (error) throw error
-            toast.success(qtd > 1 ? `Conta de ${conta.label} cancelada` : 'Pedido cancelado com sucesso')
-
-            registrarAuditLog({
-                acao: 'pedido.cancelamento' as any,
-                entidade: 'pedidos',
-                entidade_id: ids[0],
-                detalhes: { motivo: 'Cancelado via Caixa/PDV', conta: conta.label, pedidos: ids },
-                usuario_id: usuarioId,
-                usuario_nome: usuarioNome,
+            // 1) Valida a senha do ADM. Só TRUE quando há senha configurada e confere.
+            const { data: ok, error: errSenha } = await supabase.rpc('fn_verificar_senha_exclusao', {
+                p_senha: senhaCancelamento.trim(),
             })
+            if (errSenha) throw errSenha
+            if (ok !== true) {
+                toast.error('Senha incorreta ou não configurada pelo administrador.')
+                return
+            }
 
-            setContaSelecionadaKey(null)
+            const conta = contaSelecionada
+
+            if (modoCancelamento === 'conta') {
+                const ids = conta.pedidos.map((p) => p.id)
+                const { error } = await supabase.from('pedidos').update({ status: 'cancelado' }).in('id', ids)
+                if (error) throw error
+                registrarAuditLog({
+                    acao: 'pedido.cancelamento' as any,
+                    entidade: 'pedidos',
+                    entidade_id: ids[0],
+                    detalhes: { motivo: 'Conta cancelada via Caixa (senha ADM)', conta: conta.label, pedidos: ids },
+                    usuario_id: usuarioId,
+                    usuario_nome: usuarioNome,
+                })
+                toast.success(ids.length > 1 ? `Conta de ${conta.label} cancelada` : 'Pedido cancelado')
+            } else {
+                // Itens específicos. Pra cada pedido: se TODOS os seus itens foram
+                // marcados, cancela o pedido; senão remove só os itens marcados.
+                const pedidosCancelados: string[] = []
+                const itensRemovidos: string[] = []
+                for (const pedido of conta.pedidos) {
+                    const idsItens = pedido.itens_pedido.map((it) => it.id)
+                    const marcados = idsItens.filter((id) => itensParaCancelar.has(id))
+                    if (marcados.length === 0) continue
+                    if (marcados.length === idsItens.length) {
+                        const { error } = await supabase.from('pedidos').update({ status: 'cancelado' }).eq('id', pedido.id)
+                        if (error) throw error
+                        pedidosCancelados.push(pedido.id)
+                    } else {
+                        const { error } = await supabase.from('itens_pedido').delete().in('id', marcados)
+                        if (error) throw error
+                        itensRemovidos.push(...marcados)
+                    }
+                }
+                registrarAuditLog({
+                    acao: 'pedido.cancelamento' as any,
+                    entidade: 'itens_pedido',
+                    entidade_id: conta.pedidos[0].id,
+                    detalhes: {
+                        motivo: 'Itens cancelados via Caixa (senha ADM)',
+                        conta: conta.label,
+                        itens_removidos: itensRemovidos,
+                        pedidos_cancelados: pedidosCancelados,
+                    },
+                    usuario_id: usuarioId,
+                    usuario_nome: usuarioNome,
+                })
+                toast.success('Itens cancelados')
+            }
+
+            setModalCancelar(false)
             await carregarPedidosProntos()
         } catch (err: unknown) {
-            toast.error('Erro ao cancelar pedido: ' + (err instanceof Error ? err.message : 'Erro desconhecido'))
+            toast.error('Erro ao cancelar: ' + (err instanceof Error ? err.message : 'Erro desconhecido'))
         } finally {
             setProcessandoCancelamento(false)
         }
@@ -1084,6 +1201,15 @@ export default function CaixaClient({
                                 <div className="flex items-center justify-between text-sm bg-blue-50 px-3 py-2 rounded-lg">
                                     <span className="text-blue-700 font-medium flex items-center gap-1.5"><Star className="w-4 h-4" /> Pontos de Fidelidade</span>
                                     <span className="font-extrabold text-blue-700">+{reciboAtual.pontosGanhos} pts</span>
+                                </div>
+                            )}
+
+                            {/* NFC-e — emitindo em segundo plano (a venda já está registrada) */}
+                            {emitindoNfceId === reciboAtual.pedidos[0]?.pedidoId
+                                && !reciboAtual.pedidos.some((p) => p.nfce) && (
+                                <div className="rounded-lg bg-blue-50 border border-blue-200 px-3 py-2.5 flex items-center gap-2 text-sm text-blue-700 font-semibold">
+                                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                                    Emitindo nota fiscal… a venda já está registrada.
                                 </div>
                             )}
 
@@ -1557,6 +1683,129 @@ export default function CaixaClient({
                 />
             )}
 
+            {/* ── Modal de Cancelamento (conta inteira OU itens) com senha do ADM ── */}
+            {modalCancelar && contaSelecionada && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
+                        <div className="flex items-center justify-between px-5 py-4 bg-red-600 text-white shrink-0">
+                            <div className="flex items-center gap-2">
+                                <Ban className="w-5 h-5" />
+                                <h3 className="font-extrabold">Cancelar · {contaSelecionada.label}</h3>
+                            </div>
+                            <button
+                                onClick={() => setModalCancelar(false)}
+                                disabled={processandoCancelamento}
+                                className="p-1 hover:bg-white/20 rounded-lg disabled:opacity-50"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        <div className="p-5 space-y-4 overflow-y-auto">
+                            {/* Escolha do que cancelar */}
+                            <div className="grid grid-cols-2 gap-2">
+                                <button
+                                    onClick={() => setModoCancelamento('conta')}
+                                    className={`py-2.5 rounded-xl text-sm font-bold border-2 transition-colors ${modoCancelamento === 'conta' ? 'border-red-500 bg-red-50 text-red-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                                >
+                                    Conta inteira
+                                </button>
+                                <button
+                                    onClick={() => setModoCancelamento('itens')}
+                                    className={`py-2.5 rounded-xl text-sm font-bold border-2 transition-colors ${modoCancelamento === 'itens' ? 'border-red-500 bg-red-50 text-red-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                                >
+                                    Itens específicos
+                                </button>
+                            </div>
+
+                            {modoCancelamento === 'conta' ? (
+                                <p className="text-sm text-gray-600">
+                                    {contaSelecionada.pedidos.length > 1
+                                        ? `Os ${contaSelecionada.pedidos.length} pedidos da conta serão cancelados`
+                                        : 'O pedido será cancelado'} e sairão do caixa. Os relatórios não os contabilizam.
+                                </p>
+                            ) : (
+                                <div className="space-y-1.5">
+                                    <p className="text-xs text-gray-500">Marque os itens que devem ser cancelados:</p>
+                                    <div className="border border-gray-200 rounded-xl divide-y divide-gray-100 max-h-52 overflow-y-auto">
+                                        {contaSelecionada.pedidos.flatMap((pedido) =>
+                                            pedido.itens_pedido.map((item) => {
+                                                const marcado = itensParaCancelar.has(item.id)
+                                                return (
+                                                    <label key={item.id} className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-gray-50">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={marcado}
+                                                            onChange={() => toggleItemCancelar(item.id)}
+                                                            className="w-4 h-4 accent-red-600"
+                                                        />
+                                                        <span className="flex-1 text-sm text-gray-800">
+                                                            {item.quantidade}× {item.produto?.nome ?? 'Produto'}
+                                                        </span>
+                                                        <span className="text-sm font-semibold text-gray-600">
+                                                            {formatCurrency(item.subtotal)}
+                                                        </span>
+                                                    </label>
+                                                )
+                                            })
+                                        )}
+                                    </div>
+                                    {itensParaCancelar.size > 0 && (
+                                        <p className="text-xs text-gray-500">{itensParaCancelar.size} item(ns) marcado(s).</p>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Senha do ADM (campo simples; o caixa nunca vê a senha) */}
+                            <div className="space-y-1.5">
+                                <p className="text-xs text-gray-500">
+                                    O cancelamento exige a <strong>senha de exclusão</strong> do administrador.
+                                </p>
+                                <div className="relative">
+                                    <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                    <input
+                                        type={revelarSenhaCancel ? 'text' : 'password'}
+                                        value={senhaCancelamento}
+                                        onChange={(e) => setSenhaCancelamento(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && confirmarCancelamento()}
+                                        placeholder="Senha de exclusão"
+                                        autoFocus
+                                        autoComplete="off"
+                                        className="w-full pl-9 pr-10 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setRevelarSenhaCancel((v) => !v)}
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-gray-600 rounded-lg"
+                                        title={revelarSenhaCancel ? 'Ocultar' : 'Mostrar'}
+                                    >
+                                        {revelarSenhaCancel ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="px-5 py-4 border-t border-gray-100 flex gap-2 shrink-0">
+                            <button
+                                onClick={() => setModalCancelar(false)}
+                                disabled={processandoCancelamento}
+                                className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-700 font-bold text-sm disabled:opacity-50"
+                            >
+                                Voltar
+                            </button>
+                            <button
+                                onClick={confirmarCancelamento}
+                                disabled={processandoCancelamento}
+                                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-50"
+                            >
+                                {processandoCancelamento ? <Loader2 className="w-4 h-4 animate-spin" /> : <Ban className="w-4 h-4" />}
+                                Confirmar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* ── Layout Principal ──
                  Desktop (lg+): split-screen tela cheia com scroll independente em cada lado.
                  Mobile: container cresce com o conteúdo e o body rola, garantindo que os
@@ -1748,7 +1997,7 @@ export default function CaixaClient({
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <button
-                                            onClick={() => handleCancelarConta(contaSelecionada)}
+                                            onClick={abrirModalCancelar}
                                             disabled={processandoCancelamento}
                                             className="px-2.5 py-1.5 text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors flex items-center gap-1 disabled:opacity-50"
                                         >
