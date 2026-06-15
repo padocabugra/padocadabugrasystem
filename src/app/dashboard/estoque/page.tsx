@@ -30,8 +30,21 @@ function ModalAjuste({
     const [tipo, setTipo] = useState<'entrada' | 'saida' | 'ajuste'>('entrada')
     const [quantidade, setQuantidade] = useState('')
     const [observacao, setObservacao] = useState('')
+    // Dados da compra — só usados quando tipo === 'entrada' (vão pro histórico do produto)
+    const [fornecedor, setFornecedor] = useState('')
+    const [numeroNF, setNumeroNF] = useState('')
+    const [dataCompra, setDataCompra] = useState(() => new Date().toLocaleDateString('en-CA'))
+    const [valorTotal, setValorTotal] = useState('')
     const [loading, setLoading] = useState(false)
     const supabase = createClient()
+
+    // Prévia do custo unitário derivado (total pago ÷ quantidade)
+    const qtdNum = parseFloat(quantidade.replace(',', '.'))
+    const valorNum = parseFloat(valorTotal.replace(',', '.'))
+    const unitarioPreview =
+        tipo === 'entrada' && valorTotal.trim() && !isNaN(valorNum) && !isNaN(qtdNum) && qtdNum > 0
+            ? valorNum / qtdNum
+            : null
 
     async function handleAjuste() {
         const qtd = parseFloat(quantidade.replace(',', '.'))
@@ -49,18 +62,40 @@ function ModalAjuste({
             const delta = tipo === 'saida' ? -qtd : tipo === 'ajuste' ? qtd - estoqueDisponivel : qtd
             const novoEstoque = tipo === 'ajuste' ? qtd : Math.max(0, estoqueDisponivel + delta)
 
+            // Dados da compra (só na entrada). valor_unitario é derivado do total pago.
+            const isEntrada = tipo === 'entrada'
+            const valorTotalNum = parseFloat(valorTotal.replace(',', '.'))
+            const temValor = isEntrada && valorTotal.trim() !== '' && !isNaN(valorTotalNum) && valorTotalNum >= 0
+            const valorUnit = temValor && qtd > 0 ? Number((valorTotalNum / qtd).toFixed(4)) : null
+
+            // Atualiza o saldo; numa entrada com valor, atualiza também o custo (último custo pago)
+            const prodUpdate: Record<string, unknown> = {
+                estoque_atual: novoEstoque,
+                updated_at: new Date().toISOString(),
+            }
+            if (valorUnit != null) prodUpdate.custo = valorUnit
+
             const { error: prodErr } = await supabase
                 .from('produtos')
-                .update({ estoque_atual: novoEstoque, updated_at: new Date().toISOString() })
+                .update(prodUpdate)
                 .eq('id', produto.id)
             if (prodErr) throw prodErr
 
-            const { error: movErr } = await supabase.from('movimentacao_estoque').insert({
+            const movPayload: Record<string, unknown> = {
                 produto_id: produto.id,
                 tipo,
                 quantidade: qtd,
                 observacao: observacao || null,
-            })
+            }
+            if (isEntrada) {
+                movPayload.numero_nota_fiscal = numeroNF.trim() || null
+                movPayload.data_compra = dataCompra || null
+                movPayload.fornecedor = fornecedor.trim() || null
+                movPayload.valor_total = temValor ? valorTotalNum : null
+                movPayload.valor_unitario = valorUnit
+            }
+
+            const { error: movErr } = await supabase.from('movimentacao_estoque').insert(movPayload)
             if (movErr) console.error('[ESTOQUE] Falha ao registrar movimentação:', movErr.message)
 
             registrarAuditLog({
@@ -74,6 +109,11 @@ function ModalAjuste({
                     estoqueAnterior: estoqueDisponivel,
                     estoqueNovo: novoEstoque,
                     observacao: observacao || undefined,
+                    fornecedor: isEntrada ? (fornecedor.trim() || undefined) : undefined,
+                    numeroNotaFiscal: isEntrada ? (numeroNF.trim() || undefined) : undefined,
+                    dataCompra: isEntrada ? (dataCompra || undefined) : undefined,
+                    valorTotal: temValor ? valorTotalNum : undefined,
+                    valorUnitario: valorUnit ?? undefined,
                 },
             })
 
@@ -132,6 +172,66 @@ function ModalAjuste({
                             </span>
                         </div>
                     </div>
+
+                    {/* Dados da compra — só na Entrada. Vão pro histórico de compras do produto. */}
+                    {tipo === 'entrada' && (
+                        <div className="space-y-3 p-3 rounded-xl border border-emerald-200 bg-emerald-50/40">
+                            <p className="text-[11px] font-semibold text-emerald-800 flex items-center gap-1.5">
+                                <Truck className="w-3.5 h-3.5" />
+                                Dados da compra (registra no histórico do produto)
+                            </p>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="text-xs font-semibold text-gray-600">Fornecedor</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Quem vendeu"
+                                        value={fornecedor}
+                                        onChange={(e) => setFornecedor(e.target.value)}
+                                        className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-200 outline-none"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs font-semibold text-gray-600">Nº Nota Fiscal</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Ex: 001234"
+                                        value={numeroNF}
+                                        onChange={(e) => setNumeroNF(e.target.value)}
+                                        className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-200 outline-none"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs font-semibold text-gray-600">Data da Compra</label>
+                                    <input
+                                        type="date"
+                                        value={dataCompra}
+                                        onChange={(e) => setDataCompra(e.target.value)}
+                                        className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-200 outline-none"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs font-semibold text-gray-600">Valor Total Pago (R$)</label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        placeholder="Ex: 80,00"
+                                        value={valorTotal}
+                                        onChange={(e) => setValorTotal(e.target.value)}
+                                        className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-200 outline-none"
+                                    />
+                                </div>
+                            </div>
+                            {unitarioPreview != null && (
+                                <p className="text-[11px] text-emerald-700">
+                                    Custo unitário: <strong>{formatCurrency(unitarioPreview)}</strong> / {produto.unidade_medida}
+                                    <span className="text-emerald-600/70"> · atualiza o custo do produto</span>
+                                </p>
+                            )}
+                        </div>
+                    )}
+
                     <div>
                         <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Observação (opcional)</label>
                         <input
@@ -173,7 +273,7 @@ function ModalHistoricoEntradas({ onClose }: { onClose: () => void }) {
         ;(async () => {
             const { data } = await supabase
                 .from('movimentacao_estoque')
-                .select('id, quantidade, numero_nota_fiscal, data_compra, fornecedor, observacao, created_at, produto:produtos ( nome, unidade_medida )')
+                .select('id, quantidade, valor_total, valor_unitario, numero_nota_fiscal, data_compra, fornecedor, observacao, created_at, produto:produtos ( nome, unidade_medida )')
                 .eq('tipo', 'entrada')
                 .order('created_at', { ascending: false })
                 .limit(300)
@@ -241,6 +341,7 @@ function ModalHistoricoEntradas({ onClose }: { onClose: () => void }) {
                                     <th className="px-3 py-2 font-semibold">Data</th>
                                     <th className="px-3 py-2 font-semibold">Produto</th>
                                     <th className="px-3 py-2 font-semibold text-right">Qtd</th>
+                                    <th className="px-3 py-2 font-semibold text-right">Valor Pago</th>
                                     <th className="px-3 py-2 font-semibold">Nota Fiscal</th>
                                     <th className="px-3 py-2 font-semibold">Fornecedor</th>
                                 </tr>
@@ -258,6 +359,11 @@ function ModalHistoricoEntradas({ onClose }: { onClose: () => void }) {
                                             <td className="px-3 py-2.5 font-semibold text-gray-800">{prod?.nome ?? '—'}</td>
                                             <td className="px-3 py-2.5 text-right text-gray-700">
                                                 {Number(e.quantidade).toLocaleString('pt-BR')} {prod?.unidade_medida ?? ''}
+                                            </td>
+                                            <td className="px-3 py-2.5 text-right">
+                                                {e.valor_total != null
+                                                    ? <span className="font-semibold text-gray-800">{formatCurrency(Number(e.valor_total))}</span>
+                                                    : <span className="text-gray-300">—</span>}
                                             </td>
                                             <td className="px-3 py-2.5">
                                                 {e.numero_nota_fiscal
@@ -277,6 +383,117 @@ function ModalHistoricoEntradas({ onClose }: { onClose: () => void }) {
     )
 }
 
+// ── Modal: Histórico de Compras de UM produto ────────────────────────────────
+function ModalHistoricoProduto({ produto, onClose }: { produto: Produto; onClose: () => void }) {
+    const supabase = createClient()
+    const [loading, setLoading] = useState(true)
+    const [compras, setCompras] = useState<any[]>([])
+
+    useEffect(() => {
+        let ativo = true
+        ;(async () => {
+            const { data } = await supabase
+                .from('movimentacao_estoque')
+                .select('id, quantidade, valor_total, valor_unitario, numero_nota_fiscal, data_compra, fornecedor, created_at')
+                .eq('produto_id', produto.id)
+                .eq('tipo', 'entrada')
+                .order('data_compra', { ascending: false, nullsFirst: false })
+                .order('created_at', { ascending: false })
+                .limit(500)
+            if (!ativo) return
+            setCompras(data ?? [])
+            setLoading(false)
+        })()
+        return () => { ativo = false }
+    }, [supabase, produto.id])
+
+    const fmtData = (d: string | null, fallback: string) =>
+        d ? d.split('-').reverse().join('/') : new Date(fallback).toLocaleDateString('pt-BR')
+
+    const totalQtd = compras.reduce((acc, c) => acc + Number(c.quantidade), 0)
+    const totalGasto = compras.reduce((acc, c) => acc + (c.valor_total != null ? Number(c.valor_total) : 0), 0)
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+                <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+                    <div className="flex items-center gap-2">
+                        <History className="w-5 h-5 text-blue-600" />
+                        <div>
+                            <h3 className="font-extrabold text-gray-800">Histórico de Compras</h3>
+                            <p className="text-xs text-gray-500">{produto.nome} · todas as entradas, mesmo com estoque zerado</p>
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
+                        <X className="w-4 h-4 text-gray-500" />
+                    </button>
+                </div>
+
+                {/* Resumo */}
+                <div className="grid grid-cols-3 gap-2 px-4 pt-4 shrink-0">
+                    {[
+                        { label: 'Compras', value: compras.length },
+                        { label: 'Qtd comprada', value: `${totalQtd.toLocaleString('pt-BR')} ${produto.unidade_medida}` },
+                        { label: 'Total gasto', value: formatCurrency(totalGasto) },
+                    ].map((s) => (
+                        <div key={s.label} className="px-3 py-2 rounded-xl bg-gray-50 border border-gray-100">
+                            <p className="text-sm font-extrabold text-gray-800 truncate">{s.value}</p>
+                            <p className="text-[10px] text-gray-500 uppercase tracking-wide">{s.label}</p>
+                        </div>
+                    ))}
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4">
+                    {loading ? (
+                        <div className="flex justify-center py-16">
+                            <RefreshCw className="w-6 h-6 text-blue-500 animate-spin" />
+                        </div>
+                    ) : compras.length === 0 ? (
+                        <div className="flex flex-col items-center py-16 text-gray-400 gap-3">
+                            <Truck className="w-10 h-10 opacity-20" />
+                            <p className="text-sm font-medium">Nenhuma compra registrada para este produto.</p>
+                            <p className="text-xs text-gray-400">Use “Ajustar → Entrada” e preencha os dados da nota.</p>
+                        </div>
+                    ) : (
+                        <table className="w-full text-sm text-left">
+                            <thead className="text-xs text-gray-500 uppercase tracking-wider border-b border-gray-100">
+                                <tr>
+                                    <th className="px-3 py-2 font-semibold">Data</th>
+                                    <th className="px-3 py-2 font-semibold">Fornecedor</th>
+                                    <th className="px-3 py-2 font-semibold text-right">Qtd</th>
+                                    <th className="px-3 py-2 font-semibold text-right">Valor Pago</th>
+                                    <th className="px-3 py-2 font-semibold text-right">Custo Un.</th>
+                                    <th className="px-3 py-2 font-semibold">NF</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                                {compras.map((c) => (
+                                    <tr key={c.id} className="hover:bg-blue-50/30">
+                                        <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">{fmtData(c.data_compra, c.created_at)}</td>
+                                        <td className="px-3 py-2.5 text-gray-700">{c.fornecedor || <span className="text-gray-300">—</span>}</td>
+                                        <td className="px-3 py-2.5 text-right text-gray-700">{Number(c.quantidade).toLocaleString('pt-BR')} {produto.unidade_medida}</td>
+                                        <td className="px-3 py-2.5 text-right font-semibold text-gray-800">
+                                            {c.valor_total != null ? formatCurrency(Number(c.valor_total)) : <span className="text-gray-300 font-normal">—</span>}
+                                        </td>
+                                        <td className="px-3 py-2.5 text-right text-gray-600">
+                                            {c.valor_unitario != null ? formatCurrency(Number(c.valor_unitario)) : <span className="text-gray-300">—</span>}
+                                        </td>
+                                        <td className="px-3 py-2.5">
+                                            {c.numero_nota_fiscal
+                                                ? <span className="inline-flex items-center gap-1 text-gray-700"><FileText className="w-3 h-3 text-gray-400" />{c.numero_nota_fiscal}</span>
+                                                : <span className="text-gray-300">—</span>}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+            </div>
+        </div>
+    )
+}
+
 // ── Página Principal ─────────────────────────────────────────────────────────
 export default function EstoquePage() {
     const [produtos, setProdutos] = useState<Produto[]>([])
@@ -285,6 +502,7 @@ export default function EstoquePage() {
     const [filtro, setFiltro] = useState<FiltroEstoque>('todos')
     const [modalEditar, setModalEditar] = useState<Produto | null>(null)
     const [modalAjuste, setModalAjuste] = useState<Produto | null>(null)
+    const [modalHistProduto, setModalHistProduto] = useState<Produto | null>(null)
     const [isModalNovo, setIsModalNovo] = useState(false)
     const [isHistoricoOpen, setIsHistoricoOpen] = useState(false)
     const [pagina, setPagina] = useState(1)
@@ -539,6 +757,13 @@ export default function EstoquePage() {
                                                         Ajustar
                                                     </button>
                                                     <button
+                                                        onClick={() => setModalHistProduto(produto)}
+                                                        className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                                        title="Histórico de compras"
+                                                    >
+                                                        <History className="w-3.5 h-3.5" />
+                                                    </button>
+                                                    <button
                                                         onClick={() => setModalEditar(produto)}
                                                         className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
                                                         title="Editar produto"
@@ -578,6 +803,9 @@ export default function EstoquePage() {
                 produtoToEdit={modalEditar}
             />
             {isHistoricoOpen && <ModalHistoricoEntradas onClose={() => setIsHistoricoOpen(false)} />}
+            {modalHistProduto && (
+                <ModalHistoricoProduto produto={modalHistProduto} onClose={() => setModalHistProduto(null)} />
+            )}
         </div>
     )
 }

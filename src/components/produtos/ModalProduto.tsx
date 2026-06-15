@@ -39,6 +39,7 @@ export default function ModalProduto({
     const [numeroNF, setNumeroNF] = useState('')
     const [dataCompra, setDataCompra] = useState(() => new Date().toLocaleDateString('en-CA'))
     const [fornecedor, setFornecedor] = useState('')
+    const [valorTotalEntrada, setValorTotalEntrada] = useState('')
 
     const {
         register,
@@ -121,6 +122,7 @@ export default function ModalProduto({
         setNumeroNF('')
         setDataCompra(new Date().toLocaleDateString('en-CA'))
         setFornecedor('')
+        setValorTotalEntrada('')
     }, [produtoToEdit, reset, isOpen])
 
     async function onSubmit(data: ProdutoFormData) {
@@ -170,6 +172,9 @@ export default function ModalProduto({
             if (darEntrada && produtoId) {
                 const qtdEntrada = Number((novoEstoque - estoqueAnterior).toFixed(3))
                 if (qtdEntrada > 0) {
+                    const valorTotalNum = parseFloat(valorTotalEntrada.replace(',', '.'))
+                    const temValor = valorTotalEntrada.trim() !== '' && !isNaN(valorTotalNum) && valorTotalNum >= 0
+                    const valorUnit = temValor && qtdEntrada > 0 ? Number((valorTotalNum / qtdEntrada).toFixed(4)) : null
                     const { error: movErr } = await supabase.from('movimentacao_estoque').insert({
                         produto_id: produtoId,
                         tipo: 'entrada',
@@ -178,6 +183,8 @@ export default function ModalProduto({
                         numero_nota_fiscal: numeroNF.trim() || null,
                         data_compra: dataCompra || null,
                         fornecedor: fornecedor.trim() || null,
+                        valor_total: temValor ? valorTotalNum : null,
+                        valor_unitario: valorUnit,
                     })
                     if (movErr) {
                         // Produto salvou, mas a entrada/NF não — avisa de verdade (não engole).
@@ -198,6 +205,8 @@ export default function ModalProduto({
                                 numeroNotaFiscal: numeroNF.trim() || undefined,
                                 dataCompra: dataCompra || undefined,
                                 fornecedor: fornecedor.trim() || undefined,
+                                valorTotal: temValor ? valorTotalNum : undefined,
+                                valorUnitario: valorUnit ?? undefined,
                             },
                         })
                         toast.success('Entrada registrada com a nota fiscal.')
@@ -421,15 +430,29 @@ export default function ModalProduto({
                                         />
                                     </div>
                                 </div>
-                                <div className="space-y-1">
-                                    <label className="text-xs font-semibold text-gray-600">Fornecedor</label>
-                                    <input
-                                        type="text"
-                                        placeholder="Nome do fornecedor"
-                                        value={fornecedor}
-                                        onChange={(e) => setFornecedor(e.target.value)}
-                                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-200 outline-none"
-                                    />
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-semibold text-gray-600">Fornecedor</label>
+                                        <input
+                                            type="text"
+                                            placeholder="Nome do fornecedor"
+                                            value={fornecedor}
+                                            onChange={(e) => setFornecedor(e.target.value)}
+                                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-200 outline-none"
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-semibold text-gray-600">Valor Total Pago (R$)</label>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            step="0.01"
+                                            placeholder="Ex: 80,00"
+                                            value={valorTotalEntrada}
+                                            onChange={(e) => setValorTotalEntrada(e.target.value)}
+                                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-200 outline-none"
+                                        />
+                                    </div>
                                 </div>
                             </div>
                         )}
