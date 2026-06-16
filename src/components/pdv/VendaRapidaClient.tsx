@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import {
@@ -21,6 +21,8 @@ import { dataHoraLocalVisual, getAgoraUTC } from '@/lib/timezone'
 import { useThermalPrinter } from '@/components/shared/ThermalPrinterContext'
 import { useCallback } from 'react'
 import ModalPesagem from '@/components/pedidos/ModalPesagem'
+import { resolverBusca } from '@/lib/barcode'
+import { bipSucesso, bipErro } from '@/lib/beep'
 
 // Gerador local de id pra cart_item_id (linhas kg duplicadas precisam de id unico).
 function novoCartItemId(): string {
@@ -125,6 +127,7 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
 
     const [carrinho, setCarrinho] = useState<CartItem[]>([])
     const [busca, setBusca] = useState('')
+    const buscaRef = useRef<HTMLInputElement>(null)
     const [categoriaAtiva, setCategoriaAtiva] = useState<string>('Todos')
 
     const [modalPagamento, setModalPagamento] = useState(false)
@@ -195,6 +198,30 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                 csosn: produto.csosn ?? null,
             }]
         })
+    }
+
+    // Bipagem / Enter na busca: resolve o termo (código exato vindo do scanner OU
+    // busca manual que sobra 1 produto) e adiciona ao carrinho. Lê o valor direto
+    // do input (termoRaw = e.currentTarget.value) pra não depender do estado React,
+    // que pode estar atrasado quando o scanner "digita" os dígitos muito rápido.
+    function handleBipBusca(termoRaw: string) {
+        const termo = termoRaw.trim()
+        if (!termo) return
+        const r = resolverBusca(produtos, termo)
+        if (r.tipo === 'exato' || r.tipo === 'unico') {
+            adicionar(r.produto)
+            setBusca('')
+            bipSucesso()
+            // Produto kg abre o ModalPesagem (que tem foco próprio) — não roubar o
+            // foco dele. Produto un: devolve o foco à busca pra próxima bipada.
+            if (!isKg(r.produto)) {
+                requestAnimationFrame(() => buscaRef.current?.focus())
+            }
+        } else if (r.tipo === 'nenhum') {
+            bipErro()
+            toast.error(`Nenhum produto encontrado para "${termo}"`)
+        }
+        // 'multiplos' → mantém o filtro e deixa o operador escolher na grade.
     }
 
     function alterarQtd(cart_item_id: string, delta: number) {
@@ -496,10 +523,16 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                         <div className="relative">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                             <input
+                                ref={buscaRef}
                                 type="text"
                                 placeholder="Buscar produto, digitar ou bipar código..."
                                 value={busca}
                                 onChange={(e) => setBusca(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key !== 'Enter') return
+                                    e.preventDefault()
+                                    handleBipBusca(e.currentTarget.value)
+                                }}
                                 className="w-full pl-9 pr-4 h-11 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-100 outline-none"
                                 autoFocus
                             />

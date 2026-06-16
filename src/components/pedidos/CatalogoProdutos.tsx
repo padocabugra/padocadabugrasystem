@@ -1,10 +1,16 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
+import { toast } from 'sonner'
 import { Plus, Scale, Grid, Coffee, Cookie, Sandwich, Croissant, Package, ChevronLeft, ChevronRight } from 'lucide-react'
 
 const PAGE_SIZE = 25
 import type { Produto } from '@/lib/types'
+import { resolverBusca } from '@/lib/barcode'
+import { bipSucesso, bipErro } from '@/lib/beep'
+
+const isKg = (p: { unidade_medida?: string | null }) =>
+    (p.unidade_medida ?? '').toLowerCase() === 'kg'
 
 // Estilo pastel por categoria — fundo (não selecionado), fundo intensificado
 // (selecionado) e ícone Lucide. Categorias fora da lista caem no fallback slate.
@@ -34,6 +40,7 @@ export default function CatalogoProdutos({ produtos, onAddProduto, hideHeader }:
     const [abaAtiva, setAbaAtiva] = useState('Todos')
     const [busca, setBusca] = useState('')
     const [pagina, setPagina] = useState(1)
+    const buscaRef = useRef<HTMLInputElement>(null)
 
     // Contagem por categoria — deixa explícito que o filtro mudou (ex: Bebidas é
     // ~metade do catálogo, então Todos↔Bebidas parecia "não mudar").
@@ -44,7 +51,10 @@ export default function CatalogoProdutos({ produtos, onAddProduto, hideHeader }:
 
     const produtosFiltrados = produtos.filter((p) => {
         const matchCategoria = abaAtiva === 'Todos' || (p.categoria ?? 'Sem Categoria') === abaAtiva
-        const matchBusca = p.nome.toLowerCase().includes(busca.toLowerCase())
+        const termo = busca.trim().toLowerCase()
+        const matchBusca = termo === ''
+            || p.nome.toLowerCase().includes(termo)
+            || (p.codigo ?? '').toLowerCase().includes(termo)
         return matchCategoria && matchBusca
     })
 
@@ -57,6 +67,28 @@ export default function CatalogoProdutos({ produtos, onAddProduto, hideHeader }:
     const trocarCategoria = (cat: string) => { setAbaAtiva(cat); setPagina(1) }
     const trocarBusca = (v: string) => { setBusca(v); setPagina(1) }
 
+    // Bipagem / Enter na busca: código exato do scanner OU busca manual que sobra
+    // 1 produto → adiciona ao pedido. Lê o valor direto do input pra não depender
+    // do estado React (o scanner "digita" os dígitos rápido demais).
+    function handleBip(termoRaw: string) {
+        const termo = termoRaw.trim()
+        if (!termo) return
+        const r = resolverBusca(produtos, termo)
+        if (r.tipo === 'exato' || r.tipo === 'unico') {
+            onAddProduto(r.produto)
+            trocarBusca('')
+            bipSucesso()
+            // Produto kg abre o ModalPesagem no caller (foco próprio) — não roubar.
+            if (!isKg(r.produto)) {
+                requestAnimationFrame(() => buscaRef.current?.focus())
+            }
+        } else if (r.tipo === 'nenhum') {
+            bipErro()
+            toast.error(`Nenhum produto encontrado para "${termo}"`)
+        }
+        // 'multiplos' → mantém o filtro e deixa escolher na grade.
+    }
+
     return (
         <div className="flex flex-col gap-4 h-full">
             {!hideHeader && (
@@ -65,10 +97,16 @@ export default function CatalogoProdutos({ produtos, onAddProduto, hideHeader }:
 
             {/* Busca rápida */}
             <input
+                ref={buscaRef}
                 type="search"
-                placeholder="Buscar produto..."
+                placeholder="Buscar produto, digitar ou bipar código..."
                 value={busca}
                 onChange={(e) => trocarBusca(e.target.value)}
+                onKeyDown={(e) => {
+                    if (e.key !== 'Enter') return
+                    e.preventDefault()
+                    handleBip(e.currentTarget.value)
+                }}
                 className="h-11 w-full px-4 rounded-xl border border-blue-100 bg-white text-sm
                            focus:outline-none focus:ring-2 focus:ring-primary/40"
             />
