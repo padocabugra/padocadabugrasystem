@@ -1,12 +1,13 @@
 'use client'
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import { Plus, Search, Archive, Package, FileCheck, AlertCircle, ChefHat, CheckSquare, Square, X as IconX, Eye, EyeOff, ScanLine, MousePointerClick, Trash2 } from 'lucide-react'
+import { Plus, Search, Archive, Package, FileCheck, AlertCircle, ChefHat, CheckSquare, Square, X as IconX, Eye, EyeOff, ScanLine, MousePointerClick, Trash2, Tag } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useDebounce } from '@/hooks/useDebounce'
 import { formatCurrency, isValidEAN13 } from '@/lib/formatters'
 import { toast } from 'sonner'
 import ModalProduto from '@/components/produtos/ModalProduto'
+import ModalImprimirEtiquetas from '@/components/produtos/ModalImprimirEtiquetas'
 import { registrarAuditLog } from '@/lib/audit-log'
 import type { Produto } from '@/lib/types/produto'
 
@@ -28,6 +29,8 @@ export default function ProdutosPage() {
     // Estado do modal
     const [isModalOpen, setIsModalOpen] = useState(false)
     const [editingProduto, setEditingProduto] = useState<Produto | null>(null)
+    // Modal de impressão de etiquetas (null = fechado; array = produtos a imprimir)
+    const [etiquetasProdutos, setEtiquetasProdutos] = useState<Produto[] | null>(null)
 
     const debouncedSearch = useDebounce(searchTerm, 400)
 
@@ -359,6 +362,14 @@ export default function ProdutosPage() {
                         Marcar como Para Venda
                     </button>
                     <button
+                        onClick={() => setEtiquetasProdutos(produtosSelecionadosSnapshot)}
+                        disabled={bulkUpdating}
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                        <Tag className="w-3.5 h-3.5" />
+                        Imprimir etiquetas
+                    </button>
+                    <button
                         onClick={() => setConfirmDelete(true)}
                         disabled={bulkUpdating}
                         className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-600 hover:bg-red-700 text-white transition-colors flex items-center gap-1.5 disabled:opacity-50"
@@ -538,15 +549,27 @@ export default function ProdutosPage() {
                                             </button>
                                         </td>
                                         <td className="px-3 py-4 whitespace-nowrap">
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation()
-                                                    handleEditar(produto)
-                                                }}
-                                                className="text-primary hover:text-primary/80 font-medium hover:underline"
-                                            >
-                                                Editar
-                                            </button>
+                                            <div className="flex items-center justify-end gap-3">
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation()
+                                                        setEtiquetasProdutos([produto])
+                                                    }}
+                                                    title="Imprimir etiqueta de código de barras"
+                                                    className="text-gray-500 hover:text-primary transition-colors"
+                                                >
+                                                    <Tag className="w-4 h-4" />
+                                                </button>
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation()
+                                                        handleEditar(produto)
+                                                    }}
+                                                    className="text-primary hover:text-primary/80 font-medium hover:underline"
+                                                >
+                                                    Editar
+                                                </button>
+                                            </div>
                                         </td>
                                     </tr>
                                     )
@@ -564,6 +587,14 @@ export default function ProdutosPage() {
                 onSuccess={fetchProdutos} // Atualiza lista após salvar
                 produtoToEdit={editingProduto}
             />
+
+            {/* Modal de impressão de etiquetas de código de barras */}
+            {etiquetasProdutos && (
+                <ModalImprimirEtiquetas
+                    produtos={etiquetasProdutos}
+                    onClose={() => setEtiquetasProdutos(null)}
+                />
+            )}
 
             {/* Modal de confirmação — Excluir em massa */}
             {confirmDelete && (
