@@ -15,6 +15,7 @@ import { unformatCPF, isValidCPF } from '@/lib/formatters'
 import CpfNotaInput from '@/components/shared/CpfNotaInput'
 import DescontoModal from '@/components/shared/DescontoModal'
 import { round2, distribuirDesconto } from '@/lib/desconto'
+import { toNum } from '@/lib/num'
 import { registrarAuditLog } from '@/lib/audit-log'
 import { QRCodeSVG } from 'qrcode.react'
 import { gerarPixCopiaECola, PIX_RECEBEDOR } from '@/lib/pix'
@@ -86,6 +87,31 @@ function rotuloConta(p: PedidoPDV): string {
     return 'Balcão'
 }
 
+// Normaliza um pedido cru do Supabase em PedidoPDV: achata as relações
+// (cliente/comanda/produto vêm como array OU objeto) e — CRÍTICO — coage os
+// campos `numeric` (que chegam como STRING via PostgREST) pra number real.
+// Sem isso, somar totais vira concatenação de string. Ver [[src/lib/num.ts]].
+function normalizarPedido(p: any): PedidoPDV {
+    return {
+        id: p.id,
+        numero_mesa: p.numero_mesa,
+        comanda_id: p.comanda_id ?? null,
+        cliente_id: p.cliente_id ?? null,
+        total: toNum(p.total),
+        status: p.status,
+        created_at: p.created_at,
+        cliente: Array.isArray(p.cliente) ? (p.cliente[0] ?? null) : p.cliente,
+        comanda: Array.isArray(p.comanda) ? (p.comanda[0] ?? null) : p.comanda,
+        itens_pedido: (p.itens_pedido ?? []).map((i: any) => ({
+            id: i.id,
+            quantidade: toNum(i.quantidade),
+            preco_unitario: toNum(i.preco_unitario),
+            subtotal: toNum(i.subtotal),
+            produto: Array.isArray(i.produto) ? (i.produto[0] ?? null) : i.produto,
+        })),
+    }
+}
+
 // Agrupa pedidos prontos em contas, preservando a ordem (mais antigo primeiro).
 function agruparContas(pedidos: PedidoPDV[]): Conta[] {
     const mapa = new Map<string, Conta>()
@@ -95,7 +121,9 @@ function agruparContas(pedidos: PedidoPDV[]): Conta[] {
         if (existente) {
             existente.pedidos.push(p)
             existente.itens.push(...p.itens_pedido)
-            existente.total += p.total
+            // round2 + toNum: blindagem contra ruído de float e contra total
+            // que por acaso ainda chegue como string.
+            existente.total = round2(existente.total + toNum(p.total))
             if (new Date(p.created_at) < new Date(existente.createdAt)) {
                 existente.createdAt = p.created_at
             }
@@ -116,7 +144,7 @@ function agruparContas(pedidos: PedidoPDV[]): Conta[] {
                 label: rotuloConta(p),
                 pedidos: [p],
                 itens: [...p.itens_pedido],
-                total: p.total,
+                total: toNum(p.total),
                 createdAt: p.created_at,
             })
         }
@@ -275,13 +303,16 @@ export default function CaixaClient({
 
     // Estado de abertura do caixa
     const [aberturaHoje, setAberturaHoje] = useState(aberturaHojeInicial)
-    const [saldoAtual, setSaldoAtual] = useState<number>(saldoInicialProp ?? 0)
+    const [saldoAtual, setSaldoAtual] = useState<number>(toNum(saldoInicialProp))
     const [modalAbertura, setModalAbertura] = useState(!aberturaHojeInicial)
     const [valorAbertura, setValorAbertura] = useState('')
     const [processandoAbertura, setProcessandoAbertura] = useState(false)
 
-    // Estado do PDV
-    const [pedidos, setPedidos] = useState<PedidoPDV[]>(pedidosProntosIniciais)
+    // Estado do PDV. Normaliza já na carga inicial (os totais vêm do servidor
+    // como string numeric — ver normalizarPedido / [[src/lib/num.ts]]).
+    const [pedidos, setPedidos] = useState<PedidoPDV[]>(
+        () => (pedidosProntosIniciais ?? []).map(normalizarPedido)
+    )
     const [busca, setBusca] = useState('')
     // Seleção é por CONTA (mesa/comanda/cliente), não mais por pedido individual.
     const [contaSelecionadaKey, setContaSelecionadaKey] = useState<string | null>(null)
@@ -383,24 +414,7 @@ export default function CaixaClient({
             if (error) {
                 toast.error('Erro ao carregar pedidos')
             } else {
-                const pedidosNormalizados: PedidoPDV[] = (data ?? []).map((p) => ({
-                    id: p.id,
-                    numero_mesa: p.numero_mesa,
-                    comanda_id: p.comanda_id ?? null,
-                    cliente_id: p.cliente_id ?? null,
-                    total: p.total,
-                    status: p.status,
-                    created_at: p.created_at,
-                    cliente: Array.isArray(p.cliente) ? (p.cliente[0] ?? null) : p.cliente,
-                    comanda: Array.isArray(p.comanda) ? (p.comanda[0] ?? null) : p.comanda,
-                    itens_pedido: (p.itens_pedido ?? []).map((i: any) => ({
-                        id: i.id,
-                        quantidade: i.quantidade,
-                        preco_unitario: i.preco_unitario,
-                        subtotal: i.subtotal,
-                        produto: Array.isArray(i.produto) ? (i.produto[0] ?? null) : i.produto,
-                    })),
-                }))
+                const pedidosNormalizados: PedidoPDV[] = (data ?? []).map(normalizarPedido)
                 setPedidos(pedidosNormalizados)
                 // Se a conta selecionada não tem mais pedidos prontos, limpa a seleção
                 if (contaSelecionadaKey) {
@@ -509,7 +523,7 @@ export default function CaixaClient({
 
             if (error) throw error
             setAberturaHoje(data)
-            setSaldoAtual(data.saldo)
+            setSaldoAtual(toNum(data.saldo))
             setModalAbertura(false)
             toast.success(`Caixa aberto com fundo de ${formatCurrency(valor)}`)
 
@@ -712,7 +726,7 @@ export default function CaixaClient({
                 .order('created_at', { ascending: false })
                 .limit(1)
                 .single()
-            if (saldoRow) setSaldoAtual(saldoRow.saldo)
+            if (saldoRow) setSaldoAtual(toNum(saldoRow.saldo))
 
             // Pontos de fidelidade sobre o líquido pago (trigger: floor(total/10))
             const pontosGanhos = contaSelecionada.clienteNome
@@ -896,7 +910,11 @@ export default function CaixaClient({
         }
         setProcessandoMov(true)
         try {
-            // MED-06 FIX: Busca saldo real antes de calcular para evitar inconsistência por concorrência
+            // MED-06 FIX: Busca saldo real antes de calcular para evitar inconsistência por concorrência.
+            // BUG-REFORÇO FIX: `saldo` chega do PostgREST como STRING. Sem o toNum,
+            // o reforço fazia `"171.11" + 61.9 = "171.1161.9"` (concatenação) e o
+            // banco rejeitava ("invalid input syntax for type numeric"). A sangria
+            // só escapava porque `-` coage pra número. Ver [[src/lib/num.ts]].
             const { data: saldoRow } = await supabase
                 .from('caixa')
                 .select('saldo')
@@ -904,7 +922,7 @@ export default function CaixaClient({
                 .order('created_at', { ascending: false })
                 .limit(1)
                 .single()
-            const saldoReal = saldoRow?.saldo ?? saldoAtual
+            const saldoReal = toNum(saldoRow?.saldo ?? saldoAtual)
 
             if (modalMovimentacao === 'sangria' && valor > saldoReal) {
                 toast.error(`Saldo insuficiente. Disponível: ${formatCurrency(saldoReal)}`)
@@ -912,9 +930,11 @@ export default function CaixaClient({
                 return
             }
 
-            const novoSaldo = modalMovimentacao === 'sangria'
-                ? saldoReal - valor
-                : saldoReal + valor
+            const novoSaldo = round2(
+                modalMovimentacao === 'sangria'
+                    ? saldoReal - valor
+                    : saldoReal + valor
+            )
 
             const { error } = await supabase.from('caixa').insert({
                 usuario_id: usuarioId,
