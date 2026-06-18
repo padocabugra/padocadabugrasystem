@@ -46,13 +46,25 @@ export function sanitizarCodigoProduto(input: string): string {
     return limpo || 'SEM-CODIGO'
 }
 
+// CSOSN que a emissão atual sabe montar com a nota válida. O grupo ICMS abaixo só
+// carrega CodSituacaoTributaria + modalidadeBcIcms, que é suficiente apenas para o
+// 102 (Simples Nacional, sem permissão de crédito). Os códigos de ST (201/202/203/
+// 500) exigem CEST + campos de ICMS-ST que ainda não enviamos (ver feature
+// feat/cest-wip → Rejeição 806); 300/400/900 ("Imune"/"Não tributada"/"Outros")
+// exigem outros grupos e a SEFAZ rejeita como "CSOSN indevido". Adicionar um código
+// aqui só DEPOIS que o payload souber montar o ICMS correspondente.
+const CSOSN_SUPORTADOS = new Set(['102'])
+
 // CSOSN tem 3 dígitos (102 = Simples sem permissão de crédito).
 // Telas costumam mostrar "0102" = Origem(0) + CSOSN(102) concatenados;
-// no payload os campos são separados.
+// no payload os campos são separados. Qualquer código que a emissão ainda não
+// sabe montar é coagido para 102 (com aviso no log), evitando que um cadastro
+// errado da equipe derrube a nota com "CSOSN indevido" no balcão.
 function normalizarCSOSN(input?: string | null): string {
     const digitos = (input ?? '').replace(/\D/g, '')
-    if (digitos.length === 4) return digitos.slice(1)
-    if (digitos.length === 3) return digitos
+    const cod = digitos.length === 4 ? digitos.slice(1) : digitos.length === 3 ? digitos : '102'
+    if (CSOSN_SUPORTADOS.has(cod)) return cod
+    console.warn(`[brasilnfe] CSOSN ${cod} ainda não é suportado na emissão; usando 102. Ajuste o cadastro do produto.`)
     return '102'
 }
 

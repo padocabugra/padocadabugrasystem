@@ -10,11 +10,13 @@ export const CFOP_OPTIONS = [
     { value: '5102', label: '5102 — Revenda de mercadoria' },
 ] as const
 
+// Apenas os CSOSN que a emissão de NFC-e sabe montar hoje (ver CSOSN_SUPORTADOS
+// em lib/brasilnfe.ts). Oferecer 0300/0500/0900 aqui antes era uma armadilha: a
+// equipe selecionava, mas o payload não montava o ICMS exigido e a SEFAZ rejeitava
+// ("CSOSN indevido" / Rejeição 806). O 0500 (ICMS-ST) volta quando a feature de
+// CEST (feat/cest-wip) for finalizada e enviar CEST + campos de ICMS-ST.
 export const CSOSN_OPTIONS = [
-    { value: '0102', label: '0102 — Tributação normal' },
-    { value: '0300', label: '0300 — Imune' },
-    { value: '0500', label: '0500 — ICMS cobrado por substituição tributária' },
-    { value: '0900', label: '0900 — Outros' },
+    { value: '0102', label: '0102 — Simples Nacional, sem permissão de crédito' },
 ] as const
 
 // Schema de validação para o formulário

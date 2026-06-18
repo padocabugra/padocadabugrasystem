@@ -87,3 +87,56 @@ describe('emitirNFCe — VlPago bate com o total fiscal (vNF)', () => {
         expect(calls[0].body.Pagamentos[0].VlPago).toBe(18.5)
     })
 })
+
+// Regressão "CSOSN indevido" (Suco Laranja Prats 300 cadastrado como 0900) e
+// "Rejeição 806" (sucos como 0500 sem CEST): a emissão só sabe montar o ICMS do
+// CSOSN 102. Qualquer outro código deve ser coagido para 102, em vez de derrubar
+// a nota na SEFAZ. O ICMS sempre sai com CodSituacaoTributaria suportado.
+describe('emitirNFCe — CSOSN coagido para o que a emissão suporta', () => {
+    beforeEach(() => {
+        process.env.BRASIL_NFE_URL = 'https://api.test'
+        process.env.BRASIL_NFE_TOKEN = 'tok'
+        process.env.BRASIL_NFE_AMBIENTE = '2'
+        // silencia o console.warn esperado da coerção
+        vi.spyOn(console, 'warn').mockImplementation(() => {})
+    })
+    afterEach(() => {
+        vi.unstubAllGlobals()
+        vi.restoreAllMocks()
+    })
+
+    const csosnEnviado = (calls: { body: any }[]) =>
+        calls[0].body.Produtos[0].Imposto.ICMS.CodSituacaoTributaria
+
+    it('0102 (suportado) é enviado como 102', async () => {
+        const calls = mockFetchCapturing()
+        const itens: ItemNFCe[] = [{ codigo: 'X', nome: 'Pao', quantidade: 1, valorUnitario: 5, csosn: '0102' }]
+        const res = await emitirNFCe({ itens, total: 5, formaPagamento: 'dinheiro' })
+        expect(res.ok).toBe(true)
+        expect(csosnEnviado(calls)).toBe('102')
+    })
+
+    it('0900 ("Outros", causa do erro reportado) é coagido para 102', async () => {
+        const calls = mockFetchCapturing()
+        const itens: ItemNFCe[] = [{ codigo: 'SUCO', nome: 'Suco Laranja Prats 300', quantidade: 1, valorUnitario: 6, csosn: '0900' }]
+        const res = await emitirNFCe({ itens, total: 6, formaPagamento: 'dinheiro' })
+        expect(res.ok).toBe(true)
+        expect(csosnEnviado(calls)).toBe('102')
+    })
+
+    it('0500 (ICMS-ST sem CEST) é coagido para 102', async () => {
+        const calls = mockFetchCapturing()
+        const itens: ItemNFCe[] = [{ codigo: 'SUCO', nome: 'Suco caju Prats', quantidade: 1, valorUnitario: 6, csosn: '0500' }]
+        const res = await emitirNFCe({ itens, total: 6, formaPagamento: 'dinheiro' })
+        expect(res.ok).toBe(true)
+        expect(csosnEnviado(calls)).toBe('102')
+    })
+
+    it('csosn ausente cai no default 102', async () => {
+        const calls = mockFetchCapturing()
+        const itens: ItemNFCe[] = [{ codigo: 'A', nome: 'Cafe', quantidade: 1, valorUnitario: 5 }]
+        const res = await emitirNFCe({ itens, total: 5, formaPagamento: 'pix' })
+        expect(res.ok).toBe(true)
+        expect(csosnEnviado(calls)).toBe('102')
+    })
+})
