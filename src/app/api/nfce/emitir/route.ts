@@ -85,6 +85,8 @@ export async function POST(req: Request) {
                 .from('pedidos')
                 .update({
                     chave_nfce: resultado.ok ? resultado.chaveAcesso : null,
+                    // QR-Code oficial (com hash CSC) p/ a reimpressão sair válida.
+                    qrcode_nfce: resultado.ok ? (resultado.qrCodeUrl ?? null) : null,
                     nfce_status: resultado.ok ? 'emitida' : 'erro',
                 })
                 .in('id', ids)

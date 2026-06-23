@@ -59,6 +59,8 @@ interface NfceInfo {
     ok: boolean
     chaveAcesso?: string
     danfeUrl?: string
+    /** QR-Code oficial (com hash CSC) vindo do XML autorizado. */
+    qrCodeUrl?: string
     erro?: string
 }
 
@@ -108,6 +110,7 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
             inscricaoEstadual: process.env.NEXT_PUBLIC_EMPRESA_IE,
             endereco: process.env.NEXT_PUBLIC_EMPRESA_ENDERECO,
             chaveAcesso: r.nfce.chaveAcesso,
+            qrCodeUrl: r.nfce.qrCodeUrl,
             itens: r.itensSnapshot.map((i) => ({
                 quantidade: i.quantidade,
                 precoUnitario: i.preco,
@@ -489,6 +492,7 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
             {recibo && recibo.nfce?.ok && recibo.nfce.chaveAcesso && (
                 <DanfeNFCePrint
                     chaveAcesso={recibo.nfce.chaveAcesso}
+                    qrCodeUrl={recibo.nfce.qrCodeUrl}
                     itens={recibo.itensSnapshot.map((i) => ({
                         quantidade: i.quantidade,
                         preco_unitario: i.preco,

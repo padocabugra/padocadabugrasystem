@@ -110,7 +110,55 @@ export interface ResultadoNFCe {
     chaveAcesso?: string
     protocolo?: string
     danfeUrl?: string
+    /** URL completa do QR-Code oficial da SEFAZ (com hash CSC), extraída do XML
+     *  autorizado. É o único QR válido — a chave sozinha não permite remontar o
+     *  hash sem o CSC do contribuinte. Cai em undefined se o XML não vier. */
+    qrCodeUrl?: string
+    /** URL de consulta por chave (<urlChave> do XML), p/ o rodapé do cupom. */
+    urlChave?: string
     erro?: string
+}
+
+// Desescapa as entidades XML básicas. &amp; por último pra não recompor errado.
+function decodeXmlEntities(s: string): string {
+    return s
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'")
+        .replace(/&#39;/g, "'")
+        .replace(/&amp;/g, '&')
+}
+
+// Extrai o conteúdo textual de uma tag do XML, tolerando prefixo de namespace
+// (<ns:tag>), atributos, e conteúdo em CDATA ou escapado.
+function extrairTagXml(xml: string, tag: string): string | undefined {
+    const re = new RegExp(`<(?:\\w+:)?${tag}\\b[^>]*>([\\s\\S]*?)</(?:\\w+:)?${tag}>`, 'i')
+    const m = xml.match(re)
+    if (!m) return undefined
+    const bruto = m[1].trim()
+    const cdata = bruto.match(/^<!\[CDATA\[([\s\S]*?)\]\]>$/)
+    const valor = cdata ? cdata[1] : decodeXmlEntities(bruto)
+    const limpo = valor.trim()
+    return limpo.length > 0 ? limpo : undefined
+}
+
+// O XML autorizado (procNFe) de toda NFC-e (modelo 65) carrega o grupo
+// obrigatório <infNFeSupl> com o <qrCode> — a URL de consulta COMPLETA, já com
+// o cHashQRCode (SHA-1 + CSC) calculado pelo integrador/SEFAZ. Esse é o único QR
+// que a consulta pública valida; por isso extraímos daqui em vez de remontar a
+// URL à mão (sem o CSC do contribuinte é impossível recalcular o hash).
+export function extrairQrCodeNFCe(base64Xml?: string | null): { qrCodeUrl?: string; urlChave?: string } {
+    if (!base64Xml) return {}
+    try {
+        const xml = Buffer.from(base64Xml, 'base64').toString('utf8')
+        return {
+            qrCodeUrl: extrairTagXml(xml, 'qrCode'),
+            urlChave: extrairTagXml(xml, 'urlChave'),
+        }
+    } catch {
+        return {}
+    }
 }
 
 const FORMA_PAGAMENTO_MAP: Record<string, string> = {
@@ -280,7 +328,10 @@ export async function emitirNFCe(dados: DadosNFCe): Promise<ResultadoNFCe> {
             return { ok: false, erro: String(motivo) }
         }
 
-        return { ok: true, chaveAcesso, protocolo }
+        // QR-Code oficial: vem dentro do XML autorizado (Base64Xml → infNFeSupl).
+        const { qrCodeUrl, urlChave } = extrairQrCodeNFCe(json?.Base64Xml)
+
+        return { ok: true, chaveAcesso, protocolo, qrCodeUrl, urlChave }
     } catch (err: any) {
         return { ok: false, erro: err?.message ?? 'Erro desconhecido ao conectar com Brasil NFe' }
     }

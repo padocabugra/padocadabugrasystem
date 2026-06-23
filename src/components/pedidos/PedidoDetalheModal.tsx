@@ -70,7 +70,7 @@ export default function PedidoDetalheModal({
             .from('pedidos')
             .select(`
                 id, numero_mesa, comanda_id, total, desconto, status, tipo_pedido, forma_pagamento, created_at,
-                chave_nfce, nfce_status,
+                chave_nfce, qrcode_nfce, nfce_status,
                 cliente:clientes ( nome ),
                 comanda:comandas!pedidos_comanda_id_fkey ( numero ),
                 itens_pedido (
@@ -237,6 +237,7 @@ export default function PedidoDetalheModal({
                 inscricaoEstadual: process.env.NEXT_PUBLIC_EMPRESA_IE,
                 endereco: process.env.NEXT_PUBLIC_EMPRESA_ENDERECO,
                 chaveAcesso: pedido.chave_nfce,
+                qrCodeUrl: pedido.qrcode_nfce ?? undefined,
                 itens: itens.map((i) => ({
                     quantidade: i.quantidade,
                     precoUnitario: i.preco,

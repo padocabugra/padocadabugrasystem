@@ -34,6 +34,9 @@ export interface DadosImpressaoNFCe {
     inscricaoEstadual?: string
     endereco?: string
     chaveAcesso: string
+    /** URL do QR-Code oficial da SEFAZ (infNFeSupl/qrCode, com hash CSC). Quando
+     *  ausente, cai no fallback (URL de consulta por chave, sem hash). */
+    qrCodeUrl?: string
     itens: Array<{
         quantidade: number
         precoUnitario: number
@@ -166,12 +169,14 @@ function montarCupomEscPos(dados: DadosImpressaoNFCe): Uint8Array {
         newline: '\n',
     })
 
-    // URL de consulta SEFAZ-MS pro QR-Code
+    // QR-Code: usa o oficial (com hash CSC, vindo do XML autorizado) quando
+    // disponível. Senão, fallback pra URL de consulta por chave (sem hash — não
+    // valida na SEFAZ, mas imprime). Notas antigas não têm o QR salvo.
     const ambiente = dados.chaveAcesso.charAt(20) === '1' ? '1' : '2'
     const baseUrl = ambiente === '1'
         ? 'https://www.dfe.ms.gov.br/nfce/qrcode'
         : 'https://www.dfe.ms.gov.br/nfcehom/qrcode'
-    const urlQrCode = `${baseUrl}?p=${dados.chaveAcesso}|2|${ambiente}|1`
+    const urlQrCode = dados.qrCodeUrl || `${baseUrl}?p=${dados.chaveAcesso}|2|${ambiente}|1`
 
     const chaveFormatada = dados.chaveAcesso
         .replace(/\D/g, '')

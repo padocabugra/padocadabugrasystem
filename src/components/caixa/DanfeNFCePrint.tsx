@@ -19,6 +19,10 @@ interface ItemDanfe {
 
 interface Props {
     chaveAcesso: string
+    /** URL do QR-Code oficial da SEFAZ (infNFeSupl/qrCode, com hash CSC). Quando
+     *  presente, é usada no QR; senão cai no fallback (URL de consulta por chave,
+     *  sem hash — não valida na SEFAZ, mas mantém o cupom imprimível). */
+    qrCodeUrl?: string
     itens: ItemDanfe[]
     total: number          // total LÍQUIDO (já com desconto)
     desconto?: number      // desconto concedido (R$)
@@ -41,9 +45,10 @@ function formatarChave(chave: string): string {
     return chave.replace(/\D/g, '').replace(/(\d{4})(?=\d)/g, '$1 ')
 }
 
-// URL de consulta NFC-e da SEFAZ-MS. Formato basico que abre a pagina
-// de consulta publica. O QR-Code "oficial" da SEFAZ inclui hash com
-// CSC; quando a Brasil NFe retornar essa URL no response usamos ela.
+// Fallback: URL de consulta NFC-e da SEFAZ-MS sem o hash CSC. Usada só quando o
+// QR-Code oficial (qrCodeUrl, vindo do XML autorizado) não está disponível —
+// p.ex. notas emitidas antes de passarmos a guardar o QR. Não valida na SEFAZ,
+// mas mantém o cupom imprimível sem quebrar.
 function urlConsultaSefazMS(chave: string): string {
     const ambiente = chave.charAt(20) === '1' ? '1' : '2'
     const baseUrl = ambiente === '1'
@@ -54,6 +59,7 @@ function urlConsultaSefazMS(chave: string): string {
 
 export default function DanfeNFCePrint({
     chaveAcesso,
+    qrCodeUrl,
     itens,
     total,
     desconto = 0,
@@ -68,7 +74,8 @@ export default function DanfeNFCePrint({
     const ie = process.env.NEXT_PUBLIC_EMPRESA_IE || ''
     const endereco = process.env.NEXT_PUBLIC_EMPRESA_ENDERECO || ''
 
-    const urlQrCode = urlConsultaSefazMS(chaveAcesso)
+    // QR oficial (com hash CSC) quando veio do XML; senão, fallback por chave.
+    const urlQrCode = qrCodeUrl || urlConsultaSefazMS(chaveAcesso)
     const chaveFormatada = formatarChave(chaveAcesso)
 
     return (

@@ -166,6 +166,8 @@ interface NfceInfo {
     ok: boolean
     chaveAcesso?: string
     danfeUrl?: string
+    /** QR-Code oficial (com hash CSC) vindo do XML autorizado. */
+    qrCodeUrl?: string
     erro?: string
 }
 
@@ -272,6 +274,7 @@ export default function CaixaClient({
             inscricaoEstadual: process.env.NEXT_PUBLIC_EMPRESA_IE,
             endereco: process.env.NEXT_PUBLIC_EMPRESA_ENDERECO,
             chaveAcesso: p.nfce.chaveAcesso,
+            qrCodeUrl: p.nfce.qrCodeUrl,
             itens: p.itens.map((i) => ({
                 quantidade: i.quantidade,
                 precoUnitario: i.preco_unitario,
@@ -1118,6 +1121,7 @@ export default function CaixaClient({
                     <DanfeNFCePrint
                         key={p.pedidoId}
                         chaveAcesso={p.nfce!.chaveAcesso!}
+                        qrCodeUrl={p.nfce!.qrCodeUrl}
                         itens={p.itens}
                         total={p.total}
                         desconto={p.desconto ?? 0}

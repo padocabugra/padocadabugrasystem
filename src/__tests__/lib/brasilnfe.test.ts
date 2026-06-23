@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { emitirNFCe, type ItemNFCe } from '@/lib/brasilnfe'
+import { emitirNFCe, extrairQrCodeNFCe, type ItemNFCe } from '@/lib/brasilnfe'
 
 // Regressão da rejeição de troco (865/866): o VlPago enviado à SEFAZ DEVE ser
 // igual ao total fiscal (vNF), que o integrador calcula item a item
@@ -138,5 +138,112 @@ describe('emitirNFCe — CSOSN coagido para o que a emissão suporta', () => {
         const res = await emitirNFCe({ itens, total: 5, formaPagamento: 'pix' })
         expect(res.ok).toBe(true)
         expect(csosnEnviado(calls)).toBe('102')
+    })
+})
+
+// QR-Code oficial: o cupom precisa imprimir o <qrCode> do XML autorizado (a URL
+// completa COM o hash CSC), porque a chave de acesso sozinha não permite remontar
+// o hash. extrairQrCodeNFCe decodifica o Base64Xml e puxa infNFeSupl/qrCode.
+const QR_URL =
+    'https://www.dfe.ms.gov.br/nfce/qrcode?p=' +
+    '5'.repeat(44) + '|2|1|1|ABCDEF0123456789ABCDEF0123456789ABCDEF01'
+
+function xmlAutorizado(qrCode: string, urlChave = 'www.dfe.ms.gov.br/nfce'): string {
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe${'5'.repeat(44)}"><ide></ide></infNFe>
+    <infNFeSupl>
+      <qrCode>${qrCode}</qrCode>
+      <urlChave>${urlChave}</urlChave>
+    </infNFeSupl>
+  </NFe>
+  <protNFe><infProt><cStat>100</cStat></infProt></protNFe>
+</nfeProc>`
+}
+
+const b64 = (s: string) => Buffer.from(s, 'utf8').toString('base64')
+
+describe('extrairQrCodeNFCe — puxa o QR oficial do XML autorizado', () => {
+    it('extrai qrCode escapado (entidades XML) e urlChave', () => {
+        // No XML real o & vira &amp;; aqui o QR usa só | então testo o caminho escaped puro.
+        const xml = xmlAutorizado(QR_URL)
+        const { qrCodeUrl, urlChave } = extrairQrCodeNFCe(b64(xml))
+        expect(qrCodeUrl).toBe(QR_URL)
+        expect(urlChave).toBe('www.dfe.ms.gov.br/nfce')
+    })
+
+    it('extrai qrCode em CDATA', () => {
+        const xml = xmlAutorizado(`<![CDATA[${QR_URL}]]>`)
+        const { qrCodeUrl } = extrairQrCodeNFCe(b64(xml))
+        expect(qrCodeUrl).toBe(QR_URL)
+    })
+
+    it('desescapa &amp; dentro do qrCode (URL com query string composta)', () => {
+        const comAmp = `${QR_URL}&extra=1`
+        const xml = xmlAutorizado(comAmp.replace(/&/g, '&amp;'))
+        const { qrCodeUrl } = extrairQrCodeNFCe(b64(xml))
+        expect(qrCodeUrl).toBe(comAmp)
+    })
+
+    it('tolera prefixo de namespace na tag (<ns:qrCode>)', () => {
+        const xml = `<root><ns:infNFeSupl><ns:qrCode>${QR_URL}</ns:qrCode></ns:infNFeSupl></root>`
+        const { qrCodeUrl } = extrairQrCodeNFCe(b64(xml))
+        expect(qrCodeUrl).toBe(QR_URL)
+    })
+
+    it('base64 ausente/vazio → objeto vazio (cai no fallback)', () => {
+        expect(extrairQrCodeNFCe(undefined)).toEqual({})
+        expect(extrairQrCodeNFCe(null)).toEqual({})
+        expect(extrairQrCodeNFCe('')).toEqual({})
+    })
+
+    it('XML sem infNFeSupl → qrCodeUrl undefined', () => {
+        const xml = '<nfeProc><NFe><infNFe></infNFe></NFe></nfeProc>'
+        const { qrCodeUrl } = extrairQrCodeNFCe(b64(xml))
+        expect(qrCodeUrl).toBeUndefined()
+    })
+})
+
+describe('emitirNFCe — propaga o qrCodeUrl quando a Brasil NFe devolve o XML', () => {
+    beforeEach(() => {
+        process.env.BRASIL_NFE_URL = 'https://api.test'
+        process.env.BRASIL_NFE_TOKEN = 'tok'
+        process.env.BRASIL_NFE_AMBIENTE = '2'
+    })
+    afterEach(() => {
+        vi.unstubAllGlobals()
+        vi.restoreAllMocks()
+    })
+
+    it('retorna qrCodeUrl extraído do Base64Xml da resposta', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => ({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                ReturnNF: { Ok: true, ChaveNF: '5'.repeat(44), CodStatusRespostaSefaz: '100' },
+                Base64Xml: b64(xmlAutorizado(QR_URL)),
+            }),
+        }) as unknown as Response))
+
+        const itens: ItemNFCe[] = [{ codigo: 'A', nome: 'Cafe', quantidade: 1, valorUnitario: 5 }]
+        const res = await emitirNFCe({ itens, total: 5, formaPagamento: 'dinheiro' })
+        expect(res.ok).toBe(true)
+        expect(res.qrCodeUrl).toBe(QR_URL)
+    })
+
+    it('sem Base64Xml na resposta, qrCodeUrl fica undefined (sem quebrar)', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => ({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                ReturnNF: { Ok: true, ChaveNF: '5'.repeat(44), CodStatusRespostaSefaz: '100' },
+            }),
+        }) as unknown as Response))
+
+        const itens: ItemNFCe[] = [{ codigo: 'A', nome: 'Cafe', quantidade: 1, valorUnitario: 5 }]
+        const res = await emitirNFCe({ itens, total: 5, formaPagamento: 'dinheiro' })
+        expect(res.ok).toBe(true)
+        expect(res.qrCodeUrl).toBeUndefined()
     })
 })
