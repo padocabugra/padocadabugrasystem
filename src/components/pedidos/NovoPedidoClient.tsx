@@ -4,12 +4,13 @@ import { useState, useCallback, useEffect } from 'react'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import BuscaClienteCPF from '@/components/pedidos/BuscaClienteCPF'
+import BuscaClienteNome from '@/components/pedidos/BuscaClienteNome'
 import CatalogoProdutos from '@/components/pedidos/CatalogoProdutos'
 import CarrinhoLateral from '@/components/pedidos/CarrinhoLateral'
 import ModalPesagem from '@/components/pedidos/ModalPesagem'
 import type { Produto } from '@/lib/types'
 import type { ItemCarrinho, TipoPedido, DestinoPedido } from '@/lib/types/pedidos'
-import { ShoppingCart as CartIcon, MapPin, Truck, UserX, CreditCard, X, User, Zap, Search, Ban, UtensilsCrossed, Hash } from 'lucide-react'
+import { ShoppingCart as CartIcon, MapPin, Truck, UserX, CreditCard, X, User, Zap, Search, UserSearch, Ban, UtensilsCrossed, Hash } from 'lucide-react'
 
 // Gerador local de id pra cart_item_id. crypto.randomUUID() existe em todos os
 // browsers modernos. Fallback de timestamp evita explodir em ambientes velhos.
@@ -43,8 +44,8 @@ interface ClienteSelecionado {
 export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = 'local' }: NovoPedidoClientProps) {
     const [cliente, setCliente] = useState<ClienteSelecionado | null>(null)
     const [vendaAvulsa, setVendaAvulsa] = useState(false)
-    // modoCliente: qual card de identificação está ativo (3 opções mutuamente exclusivas)
-    const [modoCliente, setModoCliente] = useState<'balcao' | 'avulsa' | 'cpf'>('balcao')
+    // modoCliente: qual card de identificação está ativo (opções mutuamente exclusivas)
+    const [modoCliente, setModoCliente] = useState<'balcao' | 'avulsa' | 'cpf' | 'nome'>('balcao')
     const [tipoPedido, setTipoPedido] = useState<TipoPedido>(tipoInicial)
     const [numeroMesa, setNumeroMesa] = useState<string>('')
     const [carrinho, setCarrinho] = useState<ItemCarrinho[]>([])
@@ -376,11 +377,36 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
                                 <p className="text-[10px] text-slate-500">cliente cadastrado</p>
                             </div>
                         </button>
+
+                        {/* Card 4: Buscar Nome */}
+                        <button
+                            type="button"
+                            onClick={() => { setModoCliente('nome'); setVendaAvulsa(false) }}
+                            className={`w-[120px] h-[100px] rounded-xl border-2 p-3 bg-white flex flex-col items-center justify-center gap-1.5 transition-all duration-200 touch-manipulation active:scale-95 ${
+                                modoCliente === 'nome'
+                                    ? 'border-primary shadow-md'
+                                    : 'border-gray-200 opacity-60 hover:opacity-100'
+                            }`}
+                        >
+                            <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center">
+                                <UserSearch className="w-5 h-5 text-primary" />
+                            </div>
+                            <div className="text-center leading-tight">
+                                <p className="text-[13px] font-bold text-primary">Buscar Nome</p>
+                                <p className="text-[10px] text-slate-500">cliente cadastrado</p>
+                            </div>
+                        </button>
                     </div>
 
                     {/* Conteúdo abaixo dos cards */}
                     {modoCliente === 'cpf' && (
                         <BuscaClienteCPF
+                            onClienteSelect={setCliente}
+                            clienteSelecionado={cliente}
+                        />
+                    )}
+                    {modoCliente === 'nome' && (
+                        <BuscaClienteNome
                             onClienteSelect={setCliente}
                             clienteSelecionado={cliente}
                         />
