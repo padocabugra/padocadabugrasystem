@@ -199,6 +199,9 @@ interface DadosRecibo {
     pontosGanhos: number
     dataHora: string
     pedidos: ReciboPedido[]      // um por pedido — NFC-e + reimpressão
+    /** Se o cupom de papel deve sair na impressora. A NFC-e é SEMPRE emitida
+     *  e declarada; isto controla apenas a impressão automática. */
+    imprimir: boolean
 }
 
 const FORMAS_PAGAMENTO: { value: FormaPagamento; label: string; icon: React.ReactNode }[] = [
@@ -464,6 +467,14 @@ export default function CaixaClient({
     useEffect(() => {
         if (!reciboAtual) { autoPrintReciboRef.current = null; return }
         if (autoPrintReciboRef.current === reciboAtual) return
+        // "Finalizar sem Imprimir": zera o status pra não herdar 'ok'/'falha' da
+        // venda anterior. A nota foi emitida; só não sai papel automaticamente.
+        if (!reciboAtual.imprimir) {
+            autoPrintReciboRef.current = reciboAtual
+            setStatusImpressao('idle')
+            return
+        }
+        // Só imprime se o caixa escolheu "Emitir e Imprimir". A nota é sempre emitida.
         if (reciboAtual.pedidos.some((p) => p.nfce?.ok && p.nfce.chaveAcesso)) {
             autoPrintReciboRef.current = reciboAtual
             setStatusImpressao('idle')
@@ -644,7 +655,7 @@ export default function CaixaClient({
 
     // Finaliza a CONTA inteira: paga todos os pedidos agrupados de uma vez.
     // A NFC-e é emitida em segundo plano (ver emitirNotaConta).
-    async function handleFinalizarVenda() {
+    async function handleFinalizarVenda(imprimir: boolean) {
         if (!contaSelecionada || !aberturaHoje) return
 
         const totalBruto = contaSelecionada.total
@@ -748,6 +759,7 @@ export default function CaixaClient({
                 pontosGanhos,
                 dataHora: dataHoraLocalVisual(getAgoraUTC()),
                 pedidos: reciboPedidos,
+                imprimir,
             }
 
             registrarAuditLog({
@@ -1675,21 +1687,29 @@ export default function CaixaClient({
                                 )
                             })()}
 
-                            <div className="flex w-full gap-3">
+                            {/* Pagamento confirmado: a nota é sempre emitida; escolha se imprime. */}
+                            <div className="w-full space-y-2">
+                                <button
+                                    onClick={() => handleFinalizarVenda(true)}
+                                    disabled={processandoVenda}
+                                    className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-40"
+                                >
+                                    {processandoVenda ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                                    Emitir e Imprimir
+                                </button>
+                                <button
+                                    onClick={() => handleFinalizarVenda(false)}
+                                    disabled={processandoVenda}
+                                    className="w-full py-2.5 bg-white border border-gray-300 hover:bg-gray-100 text-gray-700 rounded-xl font-bold text-xs transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-40"
+                                >
+                                    <Receipt className="w-4 h-4" /> Finalizar sem Imprimir
+                                </button>
                                 <button
                                     onClick={() => setModalPix(false)}
                                     disabled={processandoVenda}
-                                    className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold text-sm transition-all active:scale-[0.98]"
+                                    className="w-full py-2 text-gray-500 hover:text-gray-700 rounded-xl font-semibold text-xs transition-all"
                                 >
                                     Cancelar
-                                </button>
-                                <button
-                                    onClick={handleFinalizarVenda}
-                                    disabled={processandoVenda}
-                                    className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm transition-all active:scale-[0.98] flex items-center justify-center gap-2"
-                                >
-                                    {processandoVenda ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                                    Confirmar
                                 </button>
                             </div>
                         </div>
@@ -2177,24 +2197,47 @@ export default function CaixaClient({
                                         </div>
                                     )}
 
-                                    {/* Botão Finalizar */}
-                                    <button
-                                        onClick={() => formaPagamento === 'pix' ? setModalPix(true) : handleFinalizarVenda()}
-                                        disabled={
+                                    {/* Botão Finalizar — a nota é SEMPRE emitida; a escolha
+                                        (Emitir e Imprimir / sem Imprimir) controla só o papel. */}
+                                    {(() => {
+                                        const bloqueado =
                                             processandoVenda ||
                                             !aberturaHoje ||
                                             (formaPagamento === 'dinheiro' && valorRecebidoNum < totalLiquidoConta)
+                                        if (formaPagamento === 'pix') {
+                                            return (
+                                                <button
+                                                    onClick={() => setModalPix(true)}
+                                                    disabled={bloqueado}
+                                                    className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-2xl font-extrabold text-base transition-all active:scale-[0.98] shadow-sm flex items-center justify-center gap-2 disabled:cursor-not-allowed"
+                                                >
+                                                    {processandoVenda
+                                                        ? (<><RefreshCw className="w-5 h-5 animate-spin" /> Processando...</>)
+                                                        : (<><Smartphone className="w-5 h-5" /> Gerar QR Code PIX</>)}
+                                                </button>
+                                            )
                                         }
-                                        className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-2xl font-extrabold text-base transition-all active:scale-[0.98] shadow-sm flex items-center justify-center gap-2 disabled:cursor-not-allowed"
-                                    >
-                                        {processandoVenda ? (
-                                            <><RefreshCw className="w-5 h-5 animate-spin" /> Processando...</>
-                                        ) : formaPagamento === 'pix' ? (
-                                            <><Smartphone className="w-5 h-5" /> Gerar QR Code PIX</>
-                                        ) : (
-                                            <><CheckCircle2 className="w-5 h-5" /> Finalizar Venda</>
-                                        )}
-                                    </button>
+                                        return (
+                                            <div className="space-y-2">
+                                                <button
+                                                    onClick={() => handleFinalizarVenda(true)}
+                                                    disabled={bloqueado}
+                                                    className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-2xl font-extrabold text-base transition-all active:scale-[0.98] shadow-sm flex items-center justify-center gap-2 disabled:cursor-not-allowed"
+                                                >
+                                                    {processandoVenda
+                                                        ? (<><RefreshCw className="w-5 h-5 animate-spin" /> Processando...</>)
+                                                        : (<><Printer className="w-5 h-5" /> Emitir e Imprimir</>)}
+                                                </button>
+                                                <button
+                                                    onClick={() => handleFinalizarVenda(false)}
+                                                    disabled={bloqueado}
+                                                    className="w-full py-3 bg-white border border-gray-300 hover:bg-gray-100 disabled:opacity-40 text-gray-700 rounded-2xl font-bold text-sm transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:cursor-not-allowed"
+                                                >
+                                                    <Receipt className="w-4 h-4" /> Finalizar sem Imprimir
+                                                </button>
+                                            </div>
+                                        )
+                                    })()}
 
                                     {!aberturaHoje && (
                                         <p className="text-center text-xs text-red-500 font-medium flex items-center justify-center gap-1.5">
