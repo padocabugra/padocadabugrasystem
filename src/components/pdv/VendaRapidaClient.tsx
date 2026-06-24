@@ -152,6 +152,10 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
     const [cartItemEmReweigh, setCartItemEmReweigh] = useState<string | null>(null)
 
     const [recibo, setRecibo] = useState<ReciboFinal | null>(null)
+    // Guard: garante auto-impressão UMA vez por recibo (evita reimpressão/cascata
+    // quando a identidade da impressora muda — reaquisição/retry — e recria os
+    // callbacks). Espelha o autoPrintReciboRef do CaixaClient.
+    const autoPrintReciboRef = useRef<ReciboFinal | null>(null)
 
     // CPF na nota (opcional). Formatado: 000.000.000-00
     const [cpfNota, setCpfNota] = useState('')
@@ -313,9 +317,19 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
     }, [modalPagamento])
 
     // ── Impressao automatica ao emitir NFC-e ──────────────────────────
-    // Só imprime se o caixa escolheu "Emitir e Imprimir". A nota é sempre emitida.
+    // Dispara UMA vez por recibo (guard por ref). SEM o guard, uma falha de
+    // impressão chama setImpressora no retry anti-falha (enviarComRetry), o que
+    // troca a identidade de imprimirAuto e re-roda este efeito — disparando
+    // transferOut concorrentes no mesmo endpoint USB, que colidem e voltam a
+    // falhar, gerando uma cascata infinita de "Falha na impressão". As
+    // re-tentativas legítimas ficam no retry interno do enviarComRetry e no botão
+    // de reimpressão manual. Só imprime se o caixa escolheu "Emitir e Imprimir";
+    // a NFC-e é SEMPRE emitida.
     useEffect(() => {
-        if (recibo?.imprimir && recibo?.nfce?.ok && recibo.nfce.chaveAcesso) {
+        if (!recibo) { autoPrintReciboRef.current = null; return }
+        if (autoPrintReciboRef.current === recibo) return
+        autoPrintReciboRef.current = recibo
+        if (recibo.imprimir && recibo.nfce?.ok && recibo.nfce.chaveAcesso) {
             void imprimirAuto(recibo)
         }
     }, [recibo, imprimirAuto])
