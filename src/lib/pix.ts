@@ -15,8 +15,8 @@
 
 /** Dados do recebedor (estabelecimento). Chave Pix = CNPJ, só dígitos. */
 export const PIX_RECEBEDOR = {
-    /** Chave Pix = CNPJ 57.516.294/0002-92 → somente dígitos. */
-    chave: '57516294000292',
+    /** Chave Pix = CNPJ 57.515.294/0002-92 → somente dígitos. */
+    chave: '57515294000292',
     /** Nome do recebedor (campo 59, máx. 25 chars, ASCII). */
     nome: 'PADOCA DA BUGRA',
     /** Cidade do recebedor (campo 60, máx. 15 chars, ASCII). */
