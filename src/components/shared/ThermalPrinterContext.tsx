@@ -8,11 +8,13 @@ import {
     pedirImpressoraSerial,
     imprimirNFCe,
     imprimirFechamento,
+    imprimirPedido,
     webUsbDisponivel,
     webSerialDisponivel,
     type ImpressoraPareada,
     type DadosImpressaoNFCe,
     type DadosImpressaoFechamento,
+    type DadosImpressaoPedido,
 } from '@/lib/thermal-printer'
 
 interface PrinterCtx {
@@ -30,6 +32,8 @@ interface PrinterCtx {
     imprimir: (dados: DadosImpressaoNFCe) => Promise<boolean>
     /** Imprime o comprovante de fechamento de caixa. Toast em caso de erro. */
     imprimirComprovanteFechamento: (dados: DadosImpressaoFechamento) => Promise<boolean>
+    /** Imprime a Nota de Pedido (comanda/comprovante nao-fiscal). Toast em caso de erro. */
+    imprimirComprovantePedido: (dados: DadosImpressaoPedido) => Promise<boolean>
 }
 
 const PrinterContext = createContext<PrinterCtx | null>(null)
@@ -182,6 +186,26 @@ export function ThermalPrinterProvider({ children }: { children: ReactNode }) {
         }
     }, [impressora, enviarComRetry])
 
+    const imprimirComprovantePedido = useCallback(async (dados: DadosImpressaoPedido): Promise<boolean> => {
+        let alvo = impressora ?? await obterImpressoraPareada().catch(() => null)
+        if (alvo && !impressora) setImpressora(alvo)
+        if (!alvo) {
+            toast.warning('Impressora nao configurada', {
+                description: 'Pedido pago, mas a nota nao foi impressa. Conecte uma impressora no PDV.',
+            })
+            return false
+        }
+        try {
+            await enviarComRetry(alvo, (a) => imprimirPedido(a, dados))
+            return true
+        } catch (err: any) {
+            toast.error('Falha ao imprimir a nota do pedido', {
+                description: err?.message ?? 'Verifique papel, conexao e tente novamente.',
+            })
+            return false
+        }
+    }, [impressora, enviarComRetry])
+
     return (
         <PrinterContext.Provider
             value={{
@@ -192,6 +216,7 @@ export function ThermalPrinterProvider({ children }: { children: ReactNode }) {
                 pearSerial,
                 imprimir,
                 imprimirComprovanteFechamento,
+                imprimirComprovantePedido,
             }}
         >
             {children}
@@ -210,6 +235,7 @@ export function useThermalPrinter(): PrinterCtx {
             pearSerial: async () => {},
             imprimir: async () => false,
             imprimirComprovanteFechamento: async () => false,
+            imprimirComprovantePedido: async () => false,
         }
     }
     return ctx

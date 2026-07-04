@@ -48,6 +48,7 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
     const [modoCliente, setModoCliente] = useState<'balcao' | 'avulsa' | 'cpf' | 'nome'>('balcao')
     const [tipoPedido, setTipoPedido] = useState<TipoPedido>(tipoInicial)
     const [numeroMesa, setNumeroMesa] = useState<string>('')
+    const [observacoes, setObservacoes] = useState('')
     const [carrinho, setCarrinho] = useState<ItemCarrinho[]>([])
     const [destino, setDestino] = useState<DestinoPedido>('cozinha')
     const [isSubmitting, setIsSubmitting] = useState(false)
@@ -245,6 +246,7 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
             p_comanda_id: selectedComandaId,
             p_destino_cozinha: destino === 'cozinha',
             p_destino_cafeteria: destino === 'cafeteria',
+            p_observacoes: observacoes.trim() || null,
             p_itens: carrinho.map((i) => ({
                 produto_id: i.produto_id,
                 quantidade: i.quantidade,
@@ -272,6 +274,7 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
         setCliente(null)
         setVendaAvulsa(false)
         setNumeroMesa('')
+        setObservacoes('')
         setSelectedComandaId(null)
         setSemComanda(false)
         setCarrinho([])
@@ -580,6 +583,21 @@ export default function NovoPedidoClient({ produtos, vendedorId, tipoInicial = '
                         <span className="text-sm font-bold text-primary">Pedido Delivery — Será destacado na cozinha</span>
                     </div>
                 )}
+
+                {/* Seção 3.5: Observações (opcional) — vai na Nota de Pedido */}
+                <div className="bg-white rounded-2xl border border-blue-100 p-4 shadow-sm">
+                    <p className="text-sm font-semibold text-gray-700 mb-2">
+                        Observações <span className="text-gray-400 font-normal">(opcional)</span>
+                    </p>
+                    <textarea
+                        value={observacoes}
+                        onChange={(e) => setObservacoes(e.target.value)}
+                        rows={2}
+                        placeholder="Ex: sem cebola no bacon, café sem açúcar..."
+                        className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm resize-none
+                                   focus:outline-none focus:ring-2 focus:ring-blue-100 placeholder:text-gray-300"
+                    />
+                </div>
 
                 {/* Seção 4: Catálogo */}
                 <div className="bg-white rounded-2xl border border-blue-100 p-4 shadow-sm flex-1">

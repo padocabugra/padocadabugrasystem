@@ -24,6 +24,11 @@ import ModalPesagem from '@/components/pedidos/ModalPesagem'
 import { resolverBusca } from '@/lib/barcode'
 import { bipSucesso, bipErro } from '@/lib/beep'
 
+// Flag: imprimir o DANFE NFC-e na térmica? A NFC-e é SEMPRE emitida via API;
+// isto controla só o PAPEL. Com 1 impressora, o dono pausa o DANFE
+// (NEXT_PUBLIC_IMPRIMIR_NFCE=false) e imprime a Nota de Pedido no lugar.
+const IMPRIMIR_NFCE = process.env.NEXT_PUBLIC_IMPRIMIR_NFCE !== 'false'
+
 // Gerador local de id pra cart_item_id (linhas kg duplicadas precisam de id unico).
 function novoCartItemId(): string {
     if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -329,7 +334,9 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
         if (!recibo) { autoPrintReciboRef.current = null; return }
         if (autoPrintReciboRef.current === recibo) return
         autoPrintReciboRef.current = recibo
-        if (recibo.imprimir && recibo.nfce?.ok && recibo.nfce.chaveAcesso) {
+        // DANFE só sai se a flag permitir. Com NFC-e pausada, a Nota de Pedido já
+        // saiu no pagamento (handleFinalizar) e o DANFE não imprime na térmica.
+        if (IMPRIMIR_NFCE && recibo.imprimir && recibo.nfce?.ok && recibo.nfce.chaveAcesso) {
             void imprimirAuto(recibo)
         }
     }, [recibo, imprimirAuto])
@@ -493,6 +500,27 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
             imprimir,
             cpfCliente: cpfSnapshot,
         })
+
+        // Nota de Pedido: sai na HORA do pagamento (não depende da NFC-e). Venda
+        // rápida = balcão: sempre Local / direto pro Caixa, sem mesa/comanda/obs.
+        if (imprimir) {
+            void impressora.imprimirComprovantePedido({
+                razaoSocial: process.env.NEXT_PUBLIC_EMPRESA_RAZAO_SOCIAL || 'BUGRA LTDA',
+                cnpj: process.env.NEXT_PUBLIC_EMPRESA_CNPJ || '',
+                tipoPedido: 'LOCAL',
+                destino: 'CAIXA',
+                itens: itensSnapshot.map((i) => ({
+                    quantidade: i.quantidade,
+                    precoUnitario: i.preco,
+                    subtotal: i.preco * i.quantidade,
+                    nome: i.nome,
+                    unidadeMedida: i.unidade_medida ?? null,
+                })),
+                total: liquidoSnapshot,
+                formaPagamentoLabel: FORMA_LABEL[formaSnapshot],
+                dataHora: dataHoraLocalVisual(getAgoraUTC()),
+            })
+        }
 
         setCarrinho([])
         setModalPagamento(false)

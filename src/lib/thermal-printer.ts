@@ -76,6 +76,30 @@ export interface DadosImpressaoFechamento {
     observacao?: string
 }
 
+// Dados pra NOTA DE PEDIDO (comanda de producao + comprovante do cliente).
+// Nao e documento fiscal — impressa na termica no momento do pagamento, no
+// lugar do DANFE (a NFC-e continua sendo emitida pela API, so nao imprime).
+export interface DadosImpressaoPedido {
+    razaoSocial: string
+    cnpj: string
+    tipoPedido?: string          // 'LOCAL' | 'DELIVERY'
+    destino?: string             // 'COZINHA' | 'CAFETERIA' | 'CAIXA'
+    numeroMesa?: number | null
+    comandaNumero?: number | null
+    clienteNome?: string | null
+    itens: Array<{
+        quantidade: number
+        precoUnitario: number
+        subtotal: number
+        nome: string
+        unidadeMedida?: string | null
+    }>
+    total: number
+    formaPagamentoLabel?: string
+    observacoes?: string | null
+    dataHora: string
+}
+
 // True quando o navegador tem WebUSB disponivel (HTTPS + Chrome/Edge).
 export function webUsbDisponivel(): boolean {
     return typeof navigator !== 'undefined' && 'usb' in navigator
@@ -396,4 +420,110 @@ export async function imprimirNFCe(impressora: ImpressoraPareada, dados: DadosIm
 // Imprime o comprovante de FECHAMENTO DE CAIXA (relatorio do turno). Throw se falhar.
 export async function imprimirFechamento(impressora: ImpressoraPareada, dados: DadosImpressaoFechamento): Promise<void> {
     await enviarBytes(impressora, montarFechamentoEscPos(dados))
+}
+
+// Formata a quantidade do item da nota: '10' pra unidade, '0,486kg' pra peso.
+// (o separador ' x ' do preço é adicionado por quem monta a linha)
+function formatQtdPedido(q: number, unidade?: string | null): string {
+    const un = (unidade ?? '').toLowerCase()
+    if (un === 'kg') return `${q.toFixed(3).replace('.', ',')}kg`
+    return `${Number.isInteger(q) ? q : q.toFixed(3).replace('.', ',')}`
+}
+
+// Quebra texto em linhas de no maximo `cols` chars (sem cortar palavra quando
+// possivel). Usado pras observacoes longas na nota de pedido.
+function wrapTexto(texto: string, cols = 46): string[] {
+    const palavras = texto.split(/\s+/)
+    const linhas: string[] = []
+    let atual = ''
+    for (const p of palavras) {
+        if ((atual + (atual ? ' ' : '') + p).length > cols) {
+            if (atual) linhas.push(atual)
+            atual = p.length > cols ? p.slice(0, cols) : p
+        } else {
+            atual = atual ? `${atual} ${p}` : p
+        }
+    }
+    if (atual) linhas.push(atual)
+    return linhas
+}
+
+// Constroi os bytes ESC/POS da NOTA DE PEDIDO em 80mm (48 colunas). Cabecalho
+// com nome+CNPJ, tipo/destino, mesa/comanda/cliente (so quando preenchidos),
+// itens em lista flat (2 linhas cada), total, forma de pagamento e observacoes.
+function montarPedidoEscPos(dados: DadosImpressaoPedido): Uint8Array {
+    const enc = new ReceiptPrinterEncoder({
+        language: 'esc-pos',
+        columns: 48,
+        feedBeforeCut: 3,
+        newline: '\n',
+    })
+    const sep = '-'.repeat(48)
+    const sepForte = '='.repeat(48)
+
+    enc
+        .initialize()
+        .align('center')
+        .line(sepForte)
+        .bold(true)
+        .line(dados.razaoSocial)
+        .bold(false)
+
+    if (dados.cnpj) enc.size('small').line(`CNPJ: ${dados.cnpj}`).size('normal')
+
+    enc
+        .line(sepForte)
+        .bold(true)
+        .line('NOTA DE PEDIDO')
+        .bold(false)
+        .line(sep)
+        .align('left')
+
+    const tipo = dados.tipoPedido ? dados.tipoPedido.toUpperCase() : null
+    const destino = dados.destino ? dados.destino.toUpperCase() : null
+    if (tipo || destino) {
+        enc.line(linhaLR(tipo ? `Tipo: ${tipo}` : '', destino ? `Destino: ${destino}` : ''))
+    }
+    if (dados.numeroMesa != null || dados.comandaNumero != null) {
+        enc.line(linhaLR(
+            dados.numeroMesa != null ? `Mesa: ${dados.numeroMesa}` : '',
+            dados.comandaNumero != null ? `Comanda: ${dados.comandaNumero}` : '',
+        ))
+    }
+    if (dados.clienteNome) enc.line(`Cliente: ${dados.clienteNome}`.slice(0, 48))
+
+    enc.line(sep)
+    dados.itens.forEach((item) => {
+        enc.line(item.nome.slice(0, 48))
+        const esq = `  ${formatQtdPedido(item.quantidade, item.unidadeMedida)} x ${formatBRL(item.precoUnitario)}`
+        enc.line(linhaLR(esq, formatBRL(item.subtotal)))
+    })
+    enc.line(sep)
+    enc.bold(true).line(linhaLR('TOTAL', `R$ ${formatBRL(dados.total)}`)).bold(false)
+
+    if (dados.formaPagamentoLabel) {
+        enc.line(sep).line(`Pagamento: ${dados.formaPagamentoLabel}`)
+    }
+    if (dados.observacoes && dados.observacoes.trim()) {
+        enc.line(sep)
+        wrapTexto(`Obs: ${dados.observacoes.trim()}`, 48).forEach((l) => enc.line(l))
+    }
+
+    enc
+        .line(sep)
+        .align('center')
+        .size('small')
+        .line(dados.dataHora)
+        .size('normal')
+        .line(sepForte)
+        .newline()
+        .newline()
+        .cut('partial')
+
+    return enc.encode()
+}
+
+// Imprime a NOTA DE PEDIDO (comanda/comprovante nao-fiscal). Throw se falhar.
+export async function imprimirPedido(impressora: ImpressoraPareada, dados: DadosImpressaoPedido): Promise<void> {
+    await enviarBytes(impressora, montarPedidoEscPos(dados))
 }

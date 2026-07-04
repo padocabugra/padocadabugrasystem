@@ -47,6 +47,7 @@ export default function PedidoDetalheModal({
     const impressora = useThermalPrinter()
     const [loading, setLoading] = useState(true)
     const [reimprimindo, setReimprimindo] = useState(false)
+    const [reimprimindoNota, setReimprimindoNota] = useState(false)
     const [pedido, setPedido] = useState<any | null>(null)
     const [itens, setItens] = useState<ItemEdit[]>([])
     const [editMode, setEditMode] = useState(false)
@@ -70,7 +71,7 @@ export default function PedidoDetalheModal({
             .from('pedidos')
             .select(`
                 id, numero_mesa, comanda_id, total, desconto, status, tipo_pedido, forma_pagamento, created_at,
-                chave_nfce, qrcode_nfce, nfce_status,
+                chave_nfce, qrcode_nfce, nfce_status, observacoes, destino_cozinha, destino_cafeteria,
                 cliente:clientes ( nome ),
                 comanda:comandas!pedidos_comanda_id_fkey ( numero ),
                 itens_pedido (
@@ -258,6 +259,49 @@ export default function PedidoDetalheModal({
         }
     }
 
+    // Reimpressão da NOTA DE PEDIDO (comanda/comprovante não-fiscal) de uma venda.
+    // Reconstrói a nota a partir do pedido + itens. Funciona análogo ao cupom.
+    async function reimprimirNotaPedido() {
+        if (!pedido) return
+        if (!impressora.suportado) {
+            toast.warning('Impressão térmica indisponível', { description: 'Abra o sistema no Chrome/Edge do PDV.' })
+            return
+        }
+        if (!impressora.conectada) {
+            toast.warning('Impressora não conectada', { description: 'Conecte a impressora no Caixa/PDV e tente de novo.' })
+            return
+        }
+        const cmd = Array.isArray(pedido.comanda) ? pedido.comanda[0]?.numero : pedido.comanda?.numero
+        const cli = (Array.isArray(pedido.cliente) ? pedido.cliente[0]?.nome : pedido.cliente?.nome) ?? null
+        const destino = pedido.destino_cozinha ? 'COZINHA' : pedido.destino_cafeteria ? 'CAFETERIA' : 'CAIXA'
+        setReimprimindoNota(true)
+        try {
+            const ok = await impressora.imprimirComprovantePedido({
+                razaoSocial: process.env.NEXT_PUBLIC_EMPRESA_RAZAO_SOCIAL || 'BUGRA LTDA',
+                cnpj: process.env.NEXT_PUBLIC_EMPRESA_CNPJ || '',
+                tipoPedido: pedido.tipo_pedido || 'local',
+                destino,
+                numeroMesa: pedido.numero_mesa ?? null,
+                comandaNumero: cmd ?? null,
+                clienteNome: cli,
+                itens: itens.map((i) => ({
+                    quantidade: i.quantidade,
+                    precoUnitario: i.preco,
+                    subtotal: i.preco * i.quantidade,
+                    nome: i.nome,
+                    unidadeMedida: i.unidade_medida ?? null,
+                })),
+                total: Number(pedido.total),
+                formaPagamentoLabel: FORMA_PAGAMENTO_LABEL[pedido.forma_pagamento] ?? (pedido.forma_pagamento || undefined),
+                observacoes: pedido.observacoes ?? null,
+                dataHora: new Date(pedido.created_at).toLocaleString('pt-BR'),
+            })
+            if (ok) toast.success('Nota do pedido reimpressa')
+        } finally {
+            setReimprimindoNota(false)
+        }
+    }
+
     const comandaNumero = Array.isArray(pedido?.comanda) ? pedido?.comanda[0]?.numero : pedido?.comanda?.numero
     const clienteNome = (Array.isArray(pedido?.cliente) ? pedido?.cliente[0]?.nome : pedido?.cliente?.nome) ?? null
     const isDelivery = (pedido?.tipo_pedido || 'local') === 'delivery'
@@ -408,6 +452,14 @@ export default function PedidoDetalheModal({
                 {/* Rodapé com ações */}
                 {!loading && (
                     <div className="px-5 py-4 border-t border-gray-100 shrink-0 space-y-2">
+                        {/* Reimpressão da NOTA DE PEDIDO (comanda/comprovante não-fiscal) */}
+                        {!editMode && pedido && (
+                            <button onClick={reimprimirNotaPedido} disabled={reimprimindoNota}
+                                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-50">
+                                {reimprimindoNota ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                                Reimprimir Nota do Pedido
+                            </button>
+                        )}
                         {/* Reimpressão do cupom fiscal — disponível p/ qualquer venda com NFC-e */}
                         {!editMode && pedido?.chave_nfce && (
                             <button onClick={reimprimirCupom} disabled={reimprimindo}

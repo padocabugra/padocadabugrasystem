@@ -22,6 +22,12 @@ import { gerarPixCopiaECola, PIX_RECEBEDOR } from '@/lib/pix'
 import DanfeNFCePrint from '@/components/caixa/DanfeNFCePrint'
 import { useThermalPrinter } from '@/components/shared/ThermalPrinterContext'
 
+// Flag: imprimir o DANFE NFC-e na térmica? A NFC-e é SEMPRE emitida via API;
+// isto controla só o PAPEL. Com 1 impressora só, o dono pausa o DANFE
+// (NEXT_PUBLIC_IMPRIMIR_NFCE=false) e imprime a Nota de Pedido no lugar.
+// Ausente ou 'true' = imprime DANFE (comportamento legado).
+const IMPRIMIR_NFCE = process.env.NEXT_PUBLIC_IMPRIMIR_NFCE !== 'false'
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface ItemPedidoPDV {
@@ -48,6 +54,10 @@ interface PedidoPDV {
     total: number
     status: string
     created_at: string
+    tipo_pedido?: string | null
+    destino_cozinha?: boolean
+    destino_cafeteria?: boolean
+    observacoes?: string | null
     cliente: { nome: string; cpf?: string | null } | null
     comanda: { numero: number } | null
     itens_pedido: ItemPedidoPDV[]
@@ -100,6 +110,10 @@ function normalizarPedido(p: any): PedidoPDV {
         total: toNum(p.total),
         status: p.status,
         created_at: p.created_at,
+        tipo_pedido: p.tipo_pedido ?? null,
+        destino_cozinha: p.destino_cozinha ?? undefined,
+        destino_cafeteria: p.destino_cafeteria ?? undefined,
+        observacoes: p.observacoes ?? null,
         cliente: Array.isArray(p.cliente) ? (p.cliente[0] ?? null) : p.cliente,
         comanda: Array.isArray(p.comanda) ? (p.comanda[0] ?? null) : p.comanda,
         itens_pedido: (p.itens_pedido ?? []).map((i: any) => ({
@@ -307,6 +321,44 @@ export default function CaixaClient({
         return todasOk
     }, [imprimirCupomPedido])
 
+    // Imprime a NOTA DE PEDIDO consolidada da CONTA (todos os itens de todos os
+    // pedidos numa lista única flat). Não depende da NFC-e — sai na hora do
+    // pagamento. Tipo/destino do 1º pedido; observações juntas de todos.
+    const imprimirNotaConta = useCallback(async (
+        conta: {
+            label: string; clienteNome: string | null; comandaNumero: number | null
+            numeroMesa: number | null; pedidos: PedidoPDV[]
+        },
+        itens: ItemPedidoPDV[],
+        total: number,
+        forma: FormaPagamento,
+        dataHora: string,
+    ): Promise<boolean> => {
+        const p0 = conta.pedidos[0]
+        const destino = p0?.destino_cozinha ? 'COZINHA' : p0?.destino_cafeteria ? 'CAFETERIA' : 'CAIXA'
+        const obs = conta.pedidos.map((p) => p.observacoes).filter(Boolean).join(' | ') || null
+        return impressora.imprimirComprovantePedido({
+            razaoSocial: process.env.NEXT_PUBLIC_EMPRESA_RAZAO_SOCIAL || 'BUGRA LTDA',
+            cnpj: process.env.NEXT_PUBLIC_EMPRESA_CNPJ || '',
+            tipoPedido: p0?.tipo_pedido || 'local',
+            destino,
+            numeroMesa: conta.numeroMesa,
+            comandaNumero: conta.comandaNumero,
+            clienteNome: conta.clienteNome,
+            itens: itens.map((i) => ({
+                quantidade: i.quantidade,
+                precoUnitario: i.preco_unitario,
+                subtotal: i.subtotal,
+                nome: i.produto?.nome ?? 'Produto',
+                unidadeMedida: i.produto?.unidade_medida ?? null,
+            })),
+            total,
+            formaPagamentoLabel: FORMA_LABEL[forma],
+            observacoes: obs,
+            dataHora,
+        })
+    }, [impressora])
+
     // Estado de abertura do caixa
     const [aberturaHoje, setAberturaHoje] = useState(aberturaHojeInicial)
     const [saldoAtual, setSaldoAtual] = useState<number>(toNum(saldoInicialProp))
@@ -407,6 +459,7 @@ export default function CaixaClient({
                 .from('pedidos')
                 .select(`
                     id, numero_mesa, comanda_id, cliente_id, total, status, created_at,
+                    tipo_pedido, destino_cozinha, destino_cafeteria, observacoes,
                     cliente:clientes ( nome, cpf ),
                     comanda:comandas!pedidos_comanda_id_fkey ( numero ),
                     itens_pedido (
@@ -474,6 +527,9 @@ export default function CaixaClient({
             setStatusImpressao('idle')
             return
         }
+        // NFC-e pausada (1 impressora só): NÃO imprime o DANFE na térmica — a Nota
+        // de Pedido já saiu no pagamento. Preserva o statusImpressao da nota.
+        if (!IMPRIMIR_NFCE) { autoPrintReciboRef.current = reciboAtual; return }
         // Só imprime se o caixa escolheu "Emitir e Imprimir". A nota é sempre emitida.
         if (reciboAtual.pedidos.some((p) => p.nfce?.ok && p.nfce.chaveAcesso)) {
             autoPrintReciboRef.current = reciboAtual
@@ -785,6 +841,23 @@ export default function CaixaClient({
             const cpfParaNota = cpfNota
 
             setReciboAtual(recibo)
+
+            // Nota de Pedido: sai na HORA do pagamento (não depende da NFC-e).
+            // Só quando o caixa escolheu "Emitir e Imprimir". Consolida todos os
+            // itens da conta numa única nota. O statusImpressao reflete a nota.
+            if (imprimir) {
+                void imprimirNotaConta(
+                    {
+                        label: contaSelecionada.label,
+                        clienteNome: contaSelecionada.clienteNome,
+                        comandaNumero: contaSelecionada.comandaNumero,
+                        numeroMesa: contaSelecionada.numeroMesa,
+                        pedidos: pedidosPagos,
+                    },
+                    itensConta, liquidoPago, formaNota, recibo.dataHora,
+                ).then((ok) => setStatusImpressao(ok ? 'ok' : 'falha'))
+            }
+
             setContaSelecionadaKey(null)
             setDescontoConta(0)
             setFormaPagamento('dinheiro')
