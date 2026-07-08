@@ -76,7 +76,8 @@ interface ReciboFinal {
     troco: number
     formaPagamento: FormaPagamento
     itensSnapshot: CartItem[]
-    nfce: NfceInfo
+    /** NFC-e emitida em SEGUNDO PLANO: fica undefined até a SEFAZ responder. */
+    nfce?: NfceInfo
     /** Se o cupom de papel deve sair na impressora. A NFC-e é SEMPRE emitida
      *  e declarada; isto controla apenas a impressão automática. */
     imprimir: boolean
@@ -486,23 +487,10 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
 
         toast.success(`Venda finalizada! Total: ${formatCurrency(liquidoSnapshot)}`)
 
-        // Emite NFC-e (não cancela a venda se falhar)
-        const nfce = await emitirNFCe(pedidoId, liquidoSnapshot, formaSnapshot, itensSnapshot, cpfSnapshot, descontoSnapshot)
-
-        setRecibo({
-            pedidoId,
-            total: liquidoSnapshot,
-            desconto: descontoSnapshot,
-            troco: trocoFinal,
-            formaPagamento: formaSnapshot,
-            itensSnapshot,
-            nfce,
-            imprimir,
-            cpfCliente: cpfSnapshot,
-        })
-
-        // Nota de Pedido: sai na HORA do pagamento (não depende da NFC-e). Venda
-        // rápida = balcão: sempre Local / direto pro Caixa, sem mesa/comanda/obs.
+        // 1) Nota de Pedido: sai AGORA, ANTES da NFC-e e SEM esperar por ela. É o
+        //    comprovante que SEMPRE deve sair — nunca depende da nota fiscal (que
+        //    pode falhar/atrasar/travar na SEFAZ). Venda rápida = balcão: sempre
+        //    Local / direto pro Caixa, sem mesa/comanda/obs.
         if (imprimir) {
             void impressora.imprimirComprovantePedido({
                 razaoSocial: process.env.NEXT_PUBLIC_EMPRESA_RAZAO_SOCIAL || 'BUGRA LTDA',
@@ -522,6 +510,20 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
             })
         }
 
+        // 2) Recibo na tela já — SEM a NFC-e ainda (undefined). A venda fecha na
+        //    hora; o caixa não trava esperando a SEFAZ.
+        setRecibo({
+            pedidoId,
+            total: liquidoSnapshot,
+            desconto: descontoSnapshot,
+            troco: trocoFinal,
+            formaPagamento: formaSnapshot,
+            itensSnapshot,
+            nfce: undefined,
+            imprimir,
+            cpfCliente: cpfSnapshot,
+        })
+
         setCarrinho([])
         setModalPagamento(false)
         setModalPix(false)
@@ -530,6 +532,14 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
         setDescontoVenda(0)
         setCpfNota('')
         setProcessando(false)
+
+        // 3) NFC-e em SEGUNDO PLANO (não cancela a venda se falhar). Quando a SEFAZ
+        //    responde, atualiza o recibo na tela — e, se autorizada, o DANFE imprime
+        //    sozinho pelo useEffect de auto-impressão. Espelha o CaixaClient.
+        void emitirNFCe(pedidoId, liquidoSnapshot, formaSnapshot, itensSnapshot, cpfSnapshot, descontoSnapshot)
+            .then((nfce) => {
+                setRecibo((prev) => (prev && prev.pedidoId === pedidoId ? { ...prev, nfce } : prev))
+            })
     }
 
     // ─────────────────────────────────────────────────────────────────
