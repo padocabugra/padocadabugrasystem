@@ -21,8 +21,8 @@ import { QRCodeSVG } from 'qrcode.react'
 import { gerarPixCopiaECola, PIX_RECEBEDOR } from '@/lib/pix'
 import DanfeNFCePrint from '@/components/caixa/DanfeNFCePrint'
 import { useThermalPrinter } from '@/components/shared/ThermalPrinterContext'
-import SeletorImpressao from '@/components/shared/SeletorImpressao'
-import { type OpcaoImpressao, opcaoImpressaoPadrao, resolverImpressao } from '@/lib/impressao'
+import ModalImpressao from '@/components/shared/ModalImpressao'
+import { type OpcaoImpressao, resolverImpressao } from '@/lib/impressao'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -373,10 +373,10 @@ export default function CaixaClient({
     const [contaSelecionadaKey, setContaSelecionadaKey] = useState<string | null>(null)
     const [formaPagamento, setFormaPagamento] = useState<FormaPagamento>('dinheiro')
     const [valorRecebido, setValorRecebido] = useState('')
-    // O que sai na impressora ao finalizar (papel só). A NFC-e é sempre emitida.
-    // Começa no padrão da casa (flag NEXT_PUBLIC_IMPRIMIR_NFCE) e volta a ele a
-    // cada venda finalizada — o operador ajusta pontualmente por venda.
-    const [opcaoImpressao, setOpcaoImpressao] = useState<OpcaoImpressao>(opcaoImpressaoPadrao)
+    // Modal "O que imprimir?" — abre DEPOIS do pagamento confirmado. A escolha
+    // (clique ou tecla 1–4) finaliza a venda com o papel escolhido. A NFC-e é
+    // sempre emitida à SEFAZ, independentemente da opção.
+    const [modalImpressao, setModalImpressao] = useState(false)
     // Desconto aplicado na conta selecionada (R$). Modal R$/%.
     const [descontoConta, setDescontoConta] = useState(0)
     const [modalDesconto, setModalDesconto] = useState(false)
@@ -709,6 +709,13 @@ export default function CaixaClient({
 
     // Finaliza a CONTA inteira: paga todos os pedidos agrupados de uma vez.
     // A NFC-e é emitida em segundo plano (ver emitirNotaConta).
+    // Abre o modal "O que imprimir?" após o pagamento. Fecha o modal PIX (se
+    // estiver aberto) pra não empilhar modais nem colidir atalhos de teclado.
+    function abrirModalImpressao() {
+        setModalPix(false)
+        setModalImpressao(true)
+    }
+
     async function handleFinalizarVenda(opcao: OpcaoImpressao) {
         if (!contaSelecionada || !aberturaHoje) return
 
@@ -868,7 +875,6 @@ export default function CaixaClient({
             setFormaPagamento('dinheiro')
             setValorRecebido('')
             setCpfNota('')
-            setOpcaoImpressao(opcaoImpressaoPadrao())
             setModalPix(false)
             await carregarPedidosProntos()
 
@@ -880,6 +886,8 @@ export default function CaixaClient({
             const msg = err instanceof Error ? err.message : 'Erro desconhecido'
             toast.error('Erro ao finalizar venda: ' + msg)
         } finally {
+            // Fecha o modal em qualquer desfecho (sucesso, falha de RPC ou exceção).
+            setModalImpressao(false)
             setProcessandoVenda(false)
         }
     }
@@ -1766,16 +1774,11 @@ export default function CaixaClient({
                                 )
                             })()}
 
-                            {/* Pagamento confirmado: a nota é SEMPRE emitida à SEFAZ;
-                                o operador escolhe apenas o que sai em papel. */}
-                            <div className="w-full space-y-3">
-                                <SeletorImpressao
-                                    value={opcaoImpressao}
-                                    onChange={setOpcaoImpressao}
-                                    disabled={processandoVenda}
-                                />
+                            {/* Cliente pagou: confirma e abre o modal "O que imprimir?".
+                                A nota é SEMPRE emitida à SEFAZ — a escolha é só o papel. */}
+                            <div className="w-full space-y-2">
                                 <button
-                                    onClick={() => handleFinalizarVenda(opcaoImpressao)}
+                                    onClick={abrirModalImpressao}
                                     disabled={processandoVenda}
                                     className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-40"
                                 >
@@ -1794,6 +1797,14 @@ export default function CaixaClient({
                     </div>
                 </div>
             )}
+
+            {/* ── Modal "O que imprimir?" (após o pagamento) ── */}
+            <ModalImpressao
+                aberto={modalImpressao}
+                processando={processandoVenda}
+                onEscolher={handleFinalizarVenda}
+                onCancelar={() => setModalImpressao(false)}
+            />
 
             {/* ── Modal de Desconto ── */}
             {modalDesconto && contaSelecionada && (
@@ -2275,8 +2286,8 @@ export default function CaixaClient({
                                         </div>
                                     )}
 
-                                    {/* Finalizar — a nota é SEMPRE emitida à SEFAZ; o
-                                        seletor "O que imprimir?" controla só o papel. */}
+                                    {/* Finalizar — abre o modal "O que imprimir?" (a nota
+                                        vai à SEFAZ de qualquer forma; a escolha é só o papel). */}
                                     {(() => {
                                         const bloqueado =
                                             processandoVenda ||
@@ -2296,22 +2307,15 @@ export default function CaixaClient({
                                             )
                                         }
                                         return (
-                                            <div className="space-y-3">
-                                                <SeletorImpressao
-                                                    value={opcaoImpressao}
-                                                    onChange={setOpcaoImpressao}
-                                                    disabled={bloqueado}
-                                                />
-                                                <button
-                                                    onClick={() => handleFinalizarVenda(opcaoImpressao)}
-                                                    disabled={bloqueado}
-                                                    className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-2xl font-extrabold text-base transition-all active:scale-[0.98] shadow-sm flex items-center justify-center gap-2 disabled:cursor-not-allowed"
-                                                >
-                                                    {processandoVenda
-                                                        ? (<><RefreshCw className="w-5 h-5 animate-spin" /> Processando...</>)
-                                                        : (<><CheckCircle2 className="w-5 h-5" /> Finalizar Venda</>)}
-                                                </button>
-                                            </div>
+                                            <button
+                                                onClick={abrirModalImpressao}
+                                                disabled={bloqueado}
+                                                className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-2xl font-extrabold text-base transition-all active:scale-[0.98] shadow-sm flex items-center justify-center gap-2 disabled:cursor-not-allowed"
+                                            >
+                                                {processandoVenda
+                                                    ? (<><RefreshCw className="w-5 h-5 animate-spin" /> Processando...</>)
+                                                    : (<><CheckCircle2 className="w-5 h-5" /> Finalizar Venda</>)}
+                                            </button>
                                         )
                                     })()}
 
