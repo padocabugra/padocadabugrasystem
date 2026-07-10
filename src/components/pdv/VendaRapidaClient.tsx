@@ -23,11 +23,8 @@ import { useCallback } from 'react'
 import ModalPesagem from '@/components/pedidos/ModalPesagem'
 import { resolverBusca } from '@/lib/barcode'
 import { bipSucesso, bipErro } from '@/lib/beep'
-
-// Flag: imprimir o DANFE NFC-e na térmica? A NFC-e é SEMPRE emitida via API;
-// isto controla só o PAPEL. Com 1 impressora, o dono pausa o DANFE
-// (NEXT_PUBLIC_IMPRIMIR_NFCE=false) e imprime a Nota de Pedido no lugar.
-const IMPRIMIR_NFCE = process.env.NEXT_PUBLIC_IMPRIMIR_NFCE !== 'false'
+import SeletorImpressao from '@/components/shared/SeletorImpressao'
+import { type OpcaoImpressao, opcaoImpressaoPadrao, resolverImpressao } from '@/lib/impressao'
 
 // Gerador local de id pra cart_item_id (linhas kg duplicadas precisam de id unico).
 function novoCartItemId(): string {
@@ -78,9 +75,10 @@ interface ReciboFinal {
     itensSnapshot: CartItem[]
     /** NFC-e emitida em SEGUNDO PLANO: fica undefined até a SEFAZ responder. */
     nfce?: NfceInfo
-    /** Se o cupom de papel deve sair na impressora. A NFC-e é SEMPRE emitida
-     *  e declarada; isto controla apenas a impressão automática. */
-    imprimir: boolean
+    /** Se o CUPOM FISCAL (DANFE) deve sair na impressora. A NFC-e é SEMPRE
+     *  emitida e declarada à SEFAZ; isto controla apenas a impressão do papel.
+     *  A Nota de Pedido tem impressão própria (decidida no handleFinalizar). */
+    imprimirNota: boolean
     /** CPF formatado (snapshot pra reemitir). Vazio se não informado. */
     cpfCliente?: string
 }
@@ -147,6 +145,10 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
     const [modalDesconto, setModalDesconto] = useState(false)
     const [formaPagamento, setFormaPagamento] = useState<FormaPagamento>('dinheiro')
     const [valorRecebido, setValorRecebido] = useState('')
+    // O que sai na impressora ao finalizar (papel só). A NFC-e é sempre emitida.
+    // Começa no padrão da casa (flag NEXT_PUBLIC_IMPRIMIR_NFCE) e volta a ele a
+    // cada venda finalizada — o operador ajusta pontualmente por venda.
+    const [opcaoImpressao, setOpcaoImpressao] = useState<OpcaoImpressao>(opcaoImpressaoPadrao)
     // Desconto da venda (R$). Modal R$/%.
     const [descontoVenda, setDescontoVenda] = useState(0)
     const [processando, setProcessando] = useState(false)
@@ -335,9 +337,11 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
         if (!recibo) { autoPrintReciboRef.current = null; return }
         if (autoPrintReciboRef.current === recibo) return
         autoPrintReciboRef.current = recibo
-        // DANFE só sai se a flag permitir. Com NFC-e pausada, a Nota de Pedido já
-        // saiu no pagamento (handleFinalizar) e o DANFE não imprime na térmica.
-        if (IMPRIMIR_NFCE && recibo.imprimir && recibo.nfce?.ok && recibo.nfce.chaveAcesso) {
+        // DANFE sai só se o operador incluiu o cupom fiscal ("Nota + Pedido" ou
+        // "Só Nota"). Nas outras opções, a Nota de Pedido já saiu no pagamento
+        // (handleFinalizar) e o DANFE não imprime — a NFC-e foi emitida à SEFAZ
+        // do mesmo jeito.
+        if (recibo.imprimirNota && recibo.nfce?.ok && recibo.nfce.chaveAcesso) {
             void imprimirAuto(recibo)
         }
     }, [recibo, imprimirAuto])
@@ -439,12 +443,16 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
     }
 
     // ── Finalizar ─────────────────────────────────────────────────────
-    async function handleFinalizar(imprimir: boolean) {
+    async function handleFinalizar(opcao: OpcaoImpressao) {
         if (carrinho.length === 0) return
         if (valorInsuficiente) {
             toast.error('Valor recebido menor que o total')
             return
         }
+
+        // Desacopla os dois papéis. A NFC-e é SEMPRE emitida à SEFAZ (mais abaixo,
+        // fora de qualquer condição de impressão); estes flags controlam só o papel.
+        const { imprimirPedido, imprimirNota } = resolverImpressao(opcao)
 
         setProcessando(true)
 
@@ -487,11 +495,11 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
 
         toast.success(`Venda finalizada! Total: ${formatCurrency(liquidoSnapshot)}`)
 
-        // 1) Nota de Pedido: sai AGORA, ANTES da NFC-e e SEM esperar por ela. É o
-        //    comprovante que SEMPRE deve sair — nunca depende da nota fiscal (que
-        //    pode falhar/atrasar/travar na SEFAZ). Venda rápida = balcão: sempre
-        //    Local / direto pro Caixa, sem mesa/comanda/obs.
-        if (imprimir) {
+        // 1) Nota de Pedido: sai AGORA, ANTES da NFC-e e SEM esperar por ela.
+        //    Sai só quando o operador incluiu o Pedido ("Nota + Pedido" ou "Só
+        //    Pedido") — nunca depende da nota fiscal (que pode falhar/atrasar na
+        //    SEFAZ). Venda rápida = balcão: sempre Local / direto pro Caixa.
+        if (imprimirPedido) {
             void impressora.imprimirComprovantePedido({
                 razaoSocial: process.env.NEXT_PUBLIC_EMPRESA_RAZAO_SOCIAL || 'BUGRA LTDA',
                 cnpj: process.env.NEXT_PUBLIC_EMPRESA_CNPJ || '',
@@ -520,7 +528,7 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
             formaPagamento: formaSnapshot,
             itensSnapshot,
             nfce: undefined,
-            imprimir,
+            imprimirNota,
             cpfCliente: cpfSnapshot,
         })
 
@@ -531,6 +539,7 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
         setFormaPagamento('dinheiro')
         setDescontoVenda(0)
         setCpfNota('')
+        setOpcaoImpressao(opcaoImpressaoPadrao())
         setProcessando(false)
 
         // 3) NFC-e em SEGUNDO PLANO (não cancela a venda se falhar). Quando a SEFAZ
@@ -866,7 +875,7 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                             </div>
                         </div>
 
-                        <div className="px-5 py-4 bg-gray-50 space-y-2">
+                        <div className="px-5 py-4 bg-gray-50 space-y-3">
                             {formaPagamento === 'pix' ? (
                                 <button
                                     onClick={() => setModalPix(true)}
@@ -877,20 +886,18 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                                 </button>
                             ) : (
                                 <>
-                                    {/* A nota é SEMPRE emitida; a escolha controla só a impressão do papel. */}
+                                    {/* A nota é SEMPRE emitida à SEFAZ; o seletor controla só o papel. */}
+                                    <SeletorImpressao
+                                        value={opcaoImpressao}
+                                        onChange={setOpcaoImpressao}
+                                        disabled={processando || carrinho.length === 0}
+                                    />
                                     <button
-                                        onClick={() => handleFinalizar(true)}
+                                        onClick={() => handleFinalizar(opcaoImpressao)}
                                         disabled={processando || valorInsuficiente || carrinho.length === 0}
                                         className="w-full h-14 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-base flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation shadow-lg shadow-emerald-500/30"
                                     >
-                                        {processando ? 'Processando...' : (<><Printer className="w-5 h-5" /> Emitir e Imprimir</>)}
-                                    </button>
-                                    <button
-                                        onClick={() => handleFinalizar(false)}
-                                        disabled={processando || valorInsuficiente || carrinho.length === 0}
-                                        className="w-full h-12 rounded-2xl bg-white border border-gray-300 hover:bg-gray-100 text-gray-700 font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation"
-                                    >
-                                        <Receipt className="w-4 h-4" /> Finalizar sem Imprimir
+                                        {processando ? 'Processando...' : (<><CheckCircle2 className="w-5 h-5" /> Finalizar Venda</>)}
                                     </button>
                                 </>
                             )}
@@ -949,22 +956,21 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                                 )
                             })()}
 
-                            {/* Pagamento confirmado: a nota é sempre emitida; escolha se imprime. */}
-                            <div className="w-full space-y-2">
+                            {/* Pagamento confirmado: a nota é SEMPRE emitida à SEFAZ;
+                                o operador escolhe apenas o que sai em papel. */}
+                            <div className="w-full space-y-3">
+                                <SeletorImpressao
+                                    value={opcaoImpressao}
+                                    onChange={setOpcaoImpressao}
+                                    disabled={processando}
+                                />
                                 <button
-                                    onClick={() => handleFinalizar(true)}
+                                    onClick={() => handleFinalizar(opcaoImpressao)}
                                     disabled={processando}
                                     className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-40"
                                 >
-                                    {processando ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
-                                    Emitir e Imprimir
-                                </button>
-                                <button
-                                    onClick={() => handleFinalizar(false)}
-                                    disabled={processando}
-                                    className="w-full py-2.5 bg-white border border-gray-300 hover:bg-gray-100 text-gray-700 rounded-xl font-bold text-xs transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-40"
-                                >
-                                    <Receipt className="w-4 h-4" /> Finalizar sem Imprimir
+                                    {processando ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                                    Confirmar Pagamento
                                 </button>
                                 <button
                                     onClick={() => setModalPix(false)}
