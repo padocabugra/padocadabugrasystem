@@ -79,6 +79,9 @@ interface ReciboFinal {
      *  emitida e declarada à SEFAZ; isto controla apenas a impressão do papel.
      *  A Nota de Pedido tem impressão própria (decidida no handleFinalizar). */
     imprimirNota: boolean
+    /** Opção de impressão escolhida — define o que o modal de recibo mostra
+     *  (cupom fiscal, Nota de Pedido, ambos, ou só "pagamento efetuado"). */
+    opcao: OpcaoImpressao
     /** CPF formatado (snapshot pra reemitir). Vazio se não informado. */
     cpfCliente?: string
 }
@@ -314,6 +317,11 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
     const troco = formaPagamento === 'dinheiro' ? Math.max(0, valorRecebidoNum - totalLiquido) : 0
     const valorInsuficiente = formaPagamento === 'dinheiro' && valorRecebidoNum < totalLiquido
 
+    // O que o modal de recibo deve mostrar, conforme a opção escolhida na venda.
+    const impressaoRecibo = recibo
+        ? resolverImpressao(recibo.opcao)
+        : { imprimirPedido: false, imprimirNota: false }
+
     // ── Atalho ESC fecha modal ────────────────────────────────────────
     useEffect(() => {
         if (!modalPagamento) return
@@ -539,6 +547,7 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
             itensSnapshot,
             nfce: undefined,
             imprimirNota,
+            opcao,
             cpfCliente: cpfSnapshot,
         })
 
@@ -984,13 +993,15 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                 </div>
             )}
 
-            {/* ── Modal final: troco + NFC-e ── */}
-            {recibo && (recibo.troco > 0 || recibo.nfce) && (
+            {/* ── Modal final: reflete a opção de impressão escolhida ──
+                Quando NÃO se imprime a nota fiscal (opções "Só Pedido"/"Não imprimir"),
+                aparece na hora (sem esperar a SEFAZ) e sem a seção do cupom fiscal. */}
+            {recibo && (recibo.troco > 0 || recibo.nfce || !impressaoRecibo.imprimirNota) && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
                         <div className="px-6 pt-6 pb-4 bg-gradient-to-br from-emerald-600 to-emerald-700 text-white text-center">
                             <CheckCircle2 className="w-12 h-12 mx-auto mb-2 opacity-90" />
-                            <h2 className="text-lg font-bold">Venda Finalizada!</h2>
+                            <h2 className="text-lg font-bold">{recibo.opcao === 'nenhum' ? 'Pagamento efetuado' : 'Venda Finalizada!'}</h2>
                         </div>
                         <div className="px-6 py-5 space-y-3">
                             {recibo.desconto > 0 && (
@@ -1009,7 +1020,15 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                                     <p className="text-3xl font-extrabold text-amber-700 mt-1">{formatCurrency(recibo.troco)}</p>
                                 </div>
                             )}
-                            {recibo.nfce && (
+                            {/* Nota de Pedido — confirma que o comprovante do pedido saiu */}
+                            {impressaoRecibo.imprimirPedido && (
+                                <div className="rounded-xl bg-sky-50 border border-sky-200 px-4 py-3 flex items-center gap-2 text-sm text-sky-700 font-semibold">
+                                    <Receipt className="w-4 h-4 shrink-0" /> Nota de Pedido impressa.
+                                </div>
+                            )}
+                            {/* Cupom fiscal (DANFE) — só quando o operador escolheu imprimir
+                                a nota. A NFC-e foi emitida à SEFAZ de qualquer forma. */}
+                            {impressaoRecibo.imprimirNota && recibo.nfce && (
                                 recibo.nfce.ok ? (
                                   <>
                                     <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3 space-y-1.5">

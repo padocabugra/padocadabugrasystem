@@ -213,6 +213,9 @@ interface DadosRecibo {
      *  emitida e declarada à SEFAZ; isto controla apenas a impressão do papel.
      *  A Nota de Pedido tem impressão própria (decidida no handleFinalizarVenda). */
     imprimirNota: boolean
+    /** Opção de impressão escolhida — define o que o modal de recibo mostra
+     *  (cupom fiscal, Nota de Pedido, ambos, ou só "pagamento efetuado"). */
+    opcao: OpcaoImpressao
 }
 
 const FORMAS_PAGAMENTO: { value: FormaPagamento; label: string; icon: React.ReactNode }[] = [
@@ -567,6 +570,11 @@ export default function CaixaClient({
         ? Math.max(0, valorRecebidoNum - totalLiquidoConta)
         : 0
 
+    // O que o modal de recibo deve mostrar, conforme a opção escolhida na venda.
+    const impressaoRecibo = reciboAtual
+        ? resolverImpressao(reciboAtual.opcao)
+        : { imprimirPedido: false, imprimirNota: false }
+
     // ── Abertura de Caixa ─────────────────────────────────────────────────────
 
     async function handleAbrirCaixa() {
@@ -828,6 +836,7 @@ export default function CaixaClient({
                 dataHora: dataHoraLocalVisual(getAgoraUTC()),
                 pedidos: reciboPedidos,
                 imprimirNota,
+                opcao,
             }
 
             registrarAuditLog({
@@ -1239,7 +1248,7 @@ export default function CaixaClient({
                         {/* Header do Recibo */}
                         <div className="px-6 pt-6 pb-4 bg-gradient-to-br from-emerald-600 to-emerald-700 text-white text-center">
                             <CheckCircle2 className="w-10 h-10 mx-auto mb-2 opacity-90" />
-                            <h2 className="text-lg font-bold">Venda Finalizada!</h2>
+                            <h2 className="text-lg font-bold">{reciboAtual.opcao === 'nenhum' ? 'Pagamento efetuado' : 'Venda Finalizada!'}</h2>
                             <p className="text-emerald-200 text-xs mt-0.5">{reciboAtual.dataHora}</p>
                         </div>
 
@@ -1263,24 +1272,27 @@ export default function CaixaClient({
                                 </div>
                             )}
 
-                            {/* Separador */}
-                            <div className="border-t border-dashed border-gray-200" />
-
-                            {/* Lista de Itens */}
-                            <div className="space-y-2">
-                                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Itens</p>
-                                {reciboAtual.itens.map((item) => (
-                                    <div key={item.id} className="flex items-center justify-between text-sm">
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-xs font-bold text-emerald-600 bg-emerald-50 w-6 h-6 rounded flex items-center justify-center">
-                                                {item.quantidade}x
-                                            </span>
-                                            <span className="text-gray-700 font-medium">{item.produto?.nome ?? 'Produto'}</span>
-                                        </div>
-                                        <span className="font-bold text-gray-800">{formatCurrency(item.subtotal)}</span>
+                            {/* Lista de Itens — omitida no "não imprimir" (recibo mínimo) */}
+                            {reciboAtual.opcao !== 'nenhum' && (
+                                <>
+                                    {/* Separador */}
+                                    <div className="border-t border-dashed border-gray-200" />
+                                    <div className="space-y-2">
+                                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Itens</p>
+                                        {reciboAtual.itens.map((item) => (
+                                            <div key={item.id} className="flex items-center justify-between text-sm">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-xs font-bold text-emerald-600 bg-emerald-50 w-6 h-6 rounded flex items-center justify-center">
+                                                        {item.quantidade}x
+                                                    </span>
+                                                    <span className="text-gray-700 font-medium">{item.produto?.nome ?? 'Produto'}</span>
+                                                </div>
+                                                <span className="font-bold text-gray-800">{formatCurrency(item.subtotal)}</span>
+                                            </div>
+                                        ))}
                                     </div>
-                                ))}
-                            </div>
+                                </>
+                            )}
 
                             {/* Separador */}
                             <div className="border-t border-dashed border-gray-200" />
@@ -1327,6 +1339,17 @@ export default function CaixaClient({
                                 </div>
                             )}
 
+                            {/* Nota de Pedido — confirma que o comprovante do pedido saiu */}
+                            {impressaoRecibo.imprimirPedido && (
+                                <div className="rounded-lg bg-sky-50 border border-sky-200 px-3 py-2.5 flex items-center gap-2 text-sm text-sky-700 font-semibold">
+                                    <Receipt className="w-4 h-4 shrink-0" /> Nota de Pedido impressa.
+                                </div>
+                            )}
+
+                            {/* Cupom fiscal (DANFE) — só aparece quando o operador escolheu
+                                imprimir a nota ("Nota + Pedido" ou "Só Nota"). A NFC-e foi
+                                emitida à SEFAZ de qualquer forma. */}
+                            {impressaoRecibo.imprimirNota && (<>
                             {/* NFC-e — emitindo em segundo plano (a venda já está registrada) */}
                             {emitindoNfceId === reciboAtual.pedidos[0]?.pedidoId
                                 && !reciboAtual.pedidos.some((p) => p.nfce) && (
@@ -1429,6 +1452,7 @@ export default function CaixaClient({
                                     </div>
                                 )
                             })()}
+                            </>)}
                         </div>
 
                         {/* Botão Novo Atendimento */}
