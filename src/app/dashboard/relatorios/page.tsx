@@ -29,6 +29,7 @@ interface MetricaVenda {
     receita_pix: number
     receita_debito: number
     receita_credito: number
+    receita_voucher: number
 }
 
 interface CurvaABC {
@@ -54,6 +55,7 @@ interface AuditoriaCaixa {
     total_vendas_dinheiro: number
     total_vendas_pix: number
     total_vendas_cartao: number
+    total_vendas_voucher: number
     total_sangrias: number
     total_reforcos: number
     saldo_esperado: number
@@ -143,13 +145,15 @@ function BarraReceita({
     pix,
     debito,
     credito,
+    voucher,
 }: {
     dinheiro: number
     pix: number
     debito: number
     credito: number
+    voucher: number
 }) {
-    const total = dinheiro + pix + debito + credito
+    const total = dinheiro + pix + debito + credito + voucher
     if (total === 0) return <p className="text-xs text-gray-400">Sem dados</p>
 
     const items = [
@@ -157,6 +161,7 @@ function BarraReceita({
         { label: 'PIX', valor: pix, cor: 'bg-sky-500', corText: 'text-sky-700' },
         { label: 'Débito', valor: debito, cor: 'bg-blue-600', corText: 'text-blue-700' },
         { label: 'Crédito', valor: credito, cor: 'bg-blue-400', corText: 'text-blue-700' },
+        { label: 'Voucher', valor: voucher, cor: 'bg-amber-500', corText: 'text-amber-700' },
     ]
 
     return (
@@ -271,8 +276,9 @@ export default function RelatoriosPage() {
         const pix = metricasVendas.reduce((s, m) => s + Number(m.receita_pix), 0)
         const debito = metricasVendas.reduce((s, m) => s + Number(m.receita_debito), 0)
         const credito = metricasVendas.reduce((s, m) => s + Number(m.receita_credito), 0)
+        const voucher = metricasVendas.reduce((s, m) => s + Number(m.receita_voucher), 0)
 
-        return { totalFat, totalCusto, totalVendas, ticketMedio, margem, dinheiro, pix, debito, credito }
+        return { totalFat, totalCusto, totalVendas, ticketMedio, margem, dinheiro, pix, debito, credito, voucher }
     }, [metricasVendas])
 
     // ── Exportações ──────────────────────────────────────────────────────────
@@ -291,6 +297,7 @@ export default function RelatoriosPage() {
             'PIX': Number(m.receita_pix).toFixed(2),
             'Débito': Number(m.receita_debito).toFixed(2),
             'Crédito': Number(m.receita_credito).toFixed(2),
+            'Voucher': Number(m.receita_voucher).toFixed(2),
         }))
         exportToCSV(rows, { filename: 'relatorio_vendas', title: 'Relatório de Vendas' })
         toast.success('CSV de Vendas exportado')
@@ -388,6 +395,7 @@ export default function RelatoriosPage() {
             'Vendas Dinheiro': Number(a.total_vendas_dinheiro).toFixed(2),
             'Vendas PIX': Number(a.total_vendas_pix).toFixed(2),
             'Vendas Cartão': Number(a.total_vendas_cartao).toFixed(2),
+            'Vendas Voucher': Number(a.total_vendas_voucher).toFixed(2),
             Sangrias: Number(a.total_sangrias).toFixed(2),
             Reforços: Number(a.total_reforcos).toFixed(2),
             'Saldo Esperado': Number(a.saldo_esperado).toFixed(2),
@@ -400,7 +408,7 @@ export default function RelatoriosPage() {
 
     function exportCaixaPDF() {
         exportToPDF(
-            ['Data', 'Operador', 'Abertura', 'Dinheiro', 'PIX', 'Cartão', 'Sangria', 'Reforço', 'Esperado', 'Registrado', 'Dif.'],
+            ['Data', 'Operador', 'Abertura', 'Dinheiro', 'PIX', 'Cartão', 'Voucher', 'Sangria', 'Reforço', 'Esperado', 'Registrado', 'Dif.'],
             auditoriaCaixa.map((a) => [
                 formatDate(a.data),
                 a.usuario_nome,
@@ -408,6 +416,7 @@ export default function RelatoriosPage() {
                 formatCurrency(Number(a.total_vendas_dinheiro)),
                 formatCurrency(Number(a.total_vendas_pix)),
                 formatCurrency(Number(a.total_vendas_cartao)),
+                formatCurrency(Number(a.total_vendas_voucher)),
                 formatCurrency(Number(a.total_sangrias)),
                 formatCurrency(Number(a.total_reforcos)),
                 formatCurrency(Number(a.saldo_esperado)),
@@ -549,6 +558,7 @@ export default function RelatoriosPage() {
                             pix={resumoVendas.pix}
                             debito={resumoVendas.debito}
                             credito={resumoVendas.credito}
+                            voucher={resumoVendas.voucher}
                         />
                     </div>
 
@@ -754,6 +764,7 @@ export default function RelatoriosPage() {
                                         <th className="px-3 py-2.5 font-semibold text-right">Dinheiro</th>
                                         <th className="px-3 py-2.5 font-semibold text-right">PIX</th>
                                         <th className="px-3 py-2.5 font-semibold text-right">Cartão</th>
+                                        <th className="px-3 py-2.5 font-semibold text-right">Voucher</th>
                                         <th className="px-3 py-2.5 font-semibold text-right">Sangria</th>
                                         <th className="px-3 py-2.5 font-semibold text-right">Reforço</th>
                                         <th className="px-3 py-2.5 font-semibold text-right">Esperado</th>
@@ -763,7 +774,7 @@ export default function RelatoriosPage() {
                                 </thead>
                                 <tbody className="divide-y divide-gray-50">
                                     {auditoriaCaixa.length === 0 ? (
-                                        <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">Nenhum registro de caixa no período</td></tr>
+                                        <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-400">Nenhum registro de caixa no período</td></tr>
                                     ) : auditoriaCaixa.map((a, i) => {
                                         const dif = Number(a.diferenca)
                                         return (
@@ -774,6 +785,7 @@ export default function RelatoriosPage() {
                                                 <td className="px-3 py-2.5 text-right">{formatCurrency(Number(a.total_vendas_dinheiro))}</td>
                                                 <td className="px-3 py-2.5 text-right">{formatCurrency(Number(a.total_vendas_pix))}</td>
                                                 <td className="px-3 py-2.5 text-right">{formatCurrency(Number(a.total_vendas_cartao))}</td>
+                                                <td className="px-3 py-2.5 text-right">{formatCurrency(Number(a.total_vendas_voucher))}</td>
                                                 <td className="px-3 py-2.5 text-right text-red-600">{formatCurrency(Number(a.total_sangrias))}</td>
                                                 <td className="px-3 py-2.5 text-right text-emerald-600">{formatCurrency(Number(a.total_reforcos))}</td>
                                                 <td className="px-3 py-2.5 text-right font-bold">{formatCurrency(Number(a.saldo_esperado))}</td>
