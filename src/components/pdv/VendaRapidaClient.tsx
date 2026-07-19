@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import {
     Search, Plus, Minus, Trash2, ShoppingCart, Package,
     Banknote, Smartphone, CreditCard, X, Zap, Lock, CheckCircle2,
-    Receipt, AlertTriangle, RefreshCw, Printer, Scale, Copy, BadgePercent,
+    Receipt, AlertTriangle, RefreshCw, Printer, Scale, Copy, BadgePercent, Ticket,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency, unformatCPF, isValidCPF } from '@/lib/formatters'
@@ -37,7 +37,7 @@ function novoCartItemId(): string {
 const isKg = (p: { unidade_medida?: string | null }) =>
     (p.unidade_medida ?? '').toLowerCase() === 'kg'
 
-type FormaPagamento = 'dinheiro' | 'pix' | 'debito' | 'credito'
+type FormaPagamento = 'dinheiro' | 'pix' | 'debito' | 'credito' | 'voucher'
 
 // Itens "un" fundem por produto_id (clicar de novo incrementa quantidade).
 // Itens "kg" sao linhas independentes — cada pesagem gera um cart_item_id
@@ -98,6 +98,7 @@ const FORMA_LABEL: Record<FormaPagamento, string> = {
     pix: 'PIX',
     debito: 'Cartão Débito',
     credito: 'Cartão Crédito',
+    voucher: 'Voucher',
 }
 
 const FORMAS: { value: FormaPagamento; label: string; icon: React.ReactNode }[] = [
@@ -105,6 +106,7 @@ const FORMAS: { value: FormaPagamento; label: string; icon: React.ReactNode }[] 
     { value: 'pix', label: 'PIX', icon: <Smartphone className="w-5 h-5" /> },
     { value: 'debito', label: 'Débito', icon: <CreditCard className="w-5 h-5" /> },
     { value: 'credito', label: 'Crédito', icon: <CreditCard className="w-5 h-5" /> },
+    { value: 'voucher', label: 'Voucher', icon: <Ticket className="w-5 h-5" /> },
 ]
 
 export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }: Props) {
@@ -331,6 +333,26 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
         window.addEventListener('keydown', onKey)
         return () => window.removeEventListener('keydown', onKey)
     }, [modalPagamento])
+
+    // ── Atalhos no modal PIX: 1 = pagamento efetuado (abre "O que imprimir?"),
+    //    2/Esc = cancela (fecha o QR). Só ativos com o modal PIX aberto. ──
+    useEffect(() => {
+        if (!modalPix) return
+        function onKey(e: KeyboardEvent) {
+            if (processando) return
+            if (e.key === '1') {
+                e.preventDefault()
+                setModalPagamento(false)
+                setModalPix(false)
+                setModalImpressao(true)
+            } else if (e.key === '2' || e.key === 'Escape') {
+                e.preventDefault()
+                setModalPix(false)
+            }
+        }
+        window.addEventListener('keydown', onKey)
+        return () => window.removeEventListener('keydown', onKey)
+    }, [modalPix, processando])
 
     // ── Impressao automatica ao emitir NFC-e ──────────────────────────
     // Dispara UMA vez por recibo (guard por ref). SEM o guard, uma falha de
@@ -969,23 +991,27 @@ export default function VendaRapidaClient({ vendedorId, caixaAberto, produtos }:
                                 )
                             })()}
 
-                            {/* Cliente pagou: confirma e abre o modal "O que imprimir?".
-                                A nota é SEMPRE emitida à SEFAZ — a escolha é só o papel. */}
+                            {/* Confirmação: o cliente pagou? "Pagamento efetuado" (tecla 1)
+                                confirma e abre "O que imprimir?"; "Cancelar" (tecla 2) fecha o
+                                QR. A nota é SEMPRE emitida à SEFAZ — a escolha é só o papel. */}
                             <div className="w-full space-y-2">
+                                <p className="text-xs font-semibold text-gray-500 mb-1">O cliente efetuou o pagamento?</p>
                                 <button
                                     onClick={abrirModalImpressao}
                                     disabled={processando}
                                     className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-40"
                                 >
                                     {processando ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                                    Confirmar Pagamento
+                                    Pagamento efetuado
+                                    <kbd className="ml-1 inline-flex items-center justify-center w-5 h-5 rounded bg-white/20 text-[11px] font-mono">1</kbd>
                                 </button>
                                 <button
                                     onClick={() => setModalPix(false)}
                                     disabled={processando}
-                                    className="w-full py-2 text-gray-500 hover:text-gray-700 rounded-xl font-semibold text-xs transition-all"
+                                    className="w-full py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl font-semibold text-xs transition-all flex items-center justify-center gap-2 disabled:opacity-40"
                                 >
                                     Cancelar
+                                    <kbd className="inline-flex items-center justify-center w-5 h-5 rounded bg-gray-300/60 text-[11px] font-mono text-gray-600">2</kbd>
                                 </button>
                             </div>
                         </div>

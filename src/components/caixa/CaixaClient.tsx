@@ -8,7 +8,7 @@ import {
     Search, Receipt, Banknote, CreditCard, Smartphone, ArrowDownCircle,
     ArrowUpCircle, ChevronRight, RefreshCw, CheckCircle2, X,
     DollarSign, Clock, AlertTriangle, Hash, User, Star, Printer, Lock, Copy, BadgePercent,
-    Loader2, KeyRound, Eye, EyeOff, Ban
+    Loader2, KeyRound, Eye, EyeOff, Ban, Ticket
 } from 'lucide-react'
 import { dataHoraLocalVisual, getAgoraUTC } from '@/lib/timezone'
 import { unformatCPF, isValidCPF } from '@/lib/formatters'
@@ -170,7 +170,7 @@ interface Props {
     pedidosProntosIniciais: PedidoPDV[]
 }
 
-type FormaPagamento = 'dinheiro' | 'pix' | 'debito' | 'credito'
+type FormaPagamento = 'dinheiro' | 'pix' | 'debito' | 'credito' | 'voucher'
 
 interface NfceInfo {
     ok: boolean
@@ -223,6 +223,7 @@ const FORMAS_PAGAMENTO: { value: FormaPagamento; label: string; icon: React.Reac
     { value: 'pix', label: 'PIX', icon: <Smartphone className="w-5 h-5" /> },
     { value: 'debito', label: 'Débito', icon: <CreditCard className="w-5 h-5" /> },
     { value: 'credito', label: 'Crédito', icon: <CreditCard className="w-5 h-5" /> },
+    { value: 'voucher', label: 'Voucher', icon: <Ticket className="w-5 h-5" /> },
 ]
 
 const FORMA_LABEL: Record<FormaPagamento, string> = {
@@ -230,6 +231,7 @@ const FORMA_LABEL: Record<FormaPagamento, string> = {
     pix: 'PIX',
     debito: 'Cartão Débito',
     credito: 'Cartão Crédito',
+    voucher: 'Voucher',
 }
 
 // Cor própria por forma de pagamento — dá vida e diferencia visualmente.
@@ -250,6 +252,10 @@ const FORMA_STYLE: Record<FormaPagamento, { active: string; inactive: string }> 
     credito: {
         active: 'bg-violet-600 border-violet-600 text-white shadow-md shadow-violet-200',
         inactive: 'bg-violet-50 border-violet-200 text-violet-700 hover:bg-violet-100 hover:border-violet-300',
+    },
+    voucher: {
+        active: 'bg-amber-500 border-amber-500 text-white shadow-md shadow-amber-200',
+        inactive: 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100 hover:border-amber-300',
     },
 }
 
@@ -431,6 +437,7 @@ export default function CaixaClient({
         total_pix: number
         total_debito: number
         total_credito: number
+        total_voucher: number
         total_sangrias: number
         total_reforcos: number
         saldo_esperado_dinheiro: number
@@ -723,6 +730,20 @@ export default function CaixaClient({
         setModalPix(false)
         setModalImpressao(true)
     }
+
+    // Atalhos no modal PIX: 1 = confirma o pagamento (abre "O que imprimir?"),
+    // 2 = cancela (fecha o QR). Só ativos enquanto o modal PIX está aberto e a
+    // venda não está sendo processada.
+    useEffect(() => {
+        if (!modalPix) return
+        function onKey(e: KeyboardEvent) {
+            if (processandoVenda) return
+            if (e.key === '1') { e.preventDefault(); setModalPix(false); setModalImpressao(true) }
+            else if (e.key === '2' || e.key === 'Escape') { e.preventDefault(); setModalPix(false) }
+        }
+        window.addEventListener('keydown', onKey)
+        return () => window.removeEventListener('keydown', onKey)
+    }, [modalPix, processandoVenda])
 
     async function handleFinalizarVenda(opcao: OpcaoImpressao) {
         if (!contaSelecionada || !aberturaHoje) return
@@ -1172,6 +1193,7 @@ export default function CaixaClient({
                     totalPix: resumoFechamento.total_pix,
                     totalDebito: resumoFechamento.total_debito,
                     totalCredito: resumoFechamento.total_credito,
+                    totalVoucher: resumoFechamento.total_voucher ?? 0,
                     totalSangrias: resumoFechamento.total_sangrias,
                     totalReforcos: resumoFechamento.total_reforcos,
                     saldoEsperadoDinheiro: esperado,
@@ -1625,6 +1647,10 @@ export default function CaixaClient({
                                         <span className="text-gray-500 flex items-center gap-1"><CreditCard className="w-3 h-3" /> Crédito</span>
                                         <span className="font-medium text-gray-700">{formatCurrency(resumoFechamento.total_credito)}</span>
                                     </div>
+                                    <div className="flex justify-between text-xs">
+                                        <span className="text-gray-500 flex items-center gap-1"><Ticket className="w-3 h-3" /> Voucher</span>
+                                        <span className="font-medium text-gray-700">{formatCurrency(resumoFechamento.total_voucher ?? 0)}</span>
+                                    </div>
                                     <div className="border-t border-dashed border-gray-200 my-1.5" />
                                     <div className="flex justify-between text-xs">
                                         <span className="text-red-600 flex items-center gap-1"><ArrowDownCircle className="w-3 h-3" /> Sangrias</span>
@@ -1798,23 +1824,27 @@ export default function CaixaClient({
                                 )
                             })()}
 
-                            {/* Cliente pagou: confirma e abre o modal "O que imprimir?".
-                                A nota é SEMPRE emitida à SEFAZ — a escolha é só o papel. */}
+                            {/* Confirmação: o cliente pagou? "Pagamento efetuado" (tecla 1)
+                                confirma e abre "O que imprimir?"; "Cancelar" (tecla 2) fecha o
+                                QR. A nota é SEMPRE emitida à SEFAZ — a escolha é só o papel. */}
                             <div className="w-full space-y-2">
+                                <p className="text-xs font-semibold text-gray-500 mb-1">O cliente efetuou o pagamento?</p>
                                 <button
                                     onClick={abrirModalImpressao}
                                     disabled={processandoVenda}
                                     className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-40"
                                 >
                                     {processandoVenda ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                                    Confirmar Pagamento
+                                    Pagamento efetuado
+                                    <kbd className="ml-1 inline-flex items-center justify-center w-5 h-5 rounded bg-white/20 text-[11px] font-mono">1</kbd>
                                 </button>
                                 <button
                                     onClick={() => setModalPix(false)}
                                     disabled={processandoVenda}
-                                    className="w-full py-2 text-gray-500 hover:text-gray-700 rounded-xl font-semibold text-xs transition-all"
+                                    className="w-full py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl font-semibold text-xs transition-all flex items-center justify-center gap-2 disabled:opacity-40"
                                 >
                                     Cancelar
+                                    <kbd className="inline-flex items-center justify-center w-5 h-5 rounded bg-gray-300/60 text-[11px] font-mono text-gray-600">2</kbd>
                                 </button>
                             </div>
                         </div>
@@ -2248,7 +2278,7 @@ export default function CaixaClient({
                                     {/* Forma de Pagamento */}
                                     <div>
                                         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Forma de Pagamento</p>
-                                        <div className="grid grid-cols-4 gap-2">
+                                        <div className="grid grid-cols-5 gap-1.5">
                                             {FORMAS_PAGAMENTO.map(({ value, label, icon }) => (
                                                 <button
                                                     key={value}

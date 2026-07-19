@@ -166,6 +166,10 @@ const FORMA_PAGAMENTO_MAP: Record<string, string> = {
     credito: '03',
     debito: '04',
     pix: '17',
+    // Voucher (cartão de benefício: Alelo/Sodexo/VR/Ticket…) declarado como
+    // tPag 99 (Outros) por decisão do dono — a SEFAZ tem 10/11 pra vale
+    // alimentação/refeição, mas aqui usamos o genérico.
+    voucher: '99',
 }
 
 function mapearFormaPagamento(forma: string): string {

@@ -68,6 +68,7 @@ export interface DadosImpressaoFechamento {
     totalPix: number
     totalDebito: number
     totalCredito: number
+    totalVoucher: number
     totalSangrias: number
     totalReforcos: number
     saldoEsperadoDinheiro: number
@@ -350,6 +351,7 @@ function montarFechamentoEscPos(dados: DadosImpressaoFechamento): Uint8Array {
         .line(linhaLR('  PIX', formatBRL(dados.totalPix)))
         .line(linhaLR('  Cartao Debito', formatBRL(dados.totalDebito)))
         .line(linhaLR('  Cartao Credito', formatBRL(dados.totalCredito)))
+        .line(linhaLR('  Voucher', formatBRL(dados.totalVoucher)))
         .line(sep)
         .line(linhaLR('Sangrias', '- ' + formatBRL(dados.totalSangrias)))
         .line(linhaLR('Reforcos', '+ ' + formatBRL(dados.totalReforcos)))

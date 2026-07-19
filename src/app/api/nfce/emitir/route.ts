@@ -3,7 +3,7 @@ import { emitirNFCe, type ItemNFCe } from '@/lib/brasilnfe'
 import { createClient } from '@/lib/supabase/server'
 
 // Formas de pagamento válidas — rejeita qualquer outra
-const FORMAS_VALIDAS = new Set(['dinheiro', 'credito', 'debito', 'pix'])
+const FORMAS_VALIDAS = new Set(['dinheiro', 'credito', 'debito', 'pix', 'voucher'])
 
 export async function POST(req: Request) {
     try {

@@ -88,6 +88,38 @@ describe('emitirNFCe — VlPago bate com o total fiscal (vNF)', () => {
     })
 })
 
+// A forma de pagamento vira o código tPag da SEFAZ. Voucher (cartão de
+// benefício) foi mapeado para 99 (Outros) por decisão do dono. Garante que o
+// código correto viaja no payload — e que as formas existentes não regridem.
+describe('emitirNFCe — tPag (FormaPagamento) por forma', () => {
+    beforeEach(() => {
+        process.env.BRASIL_NFE_URL = 'https://api.test'
+        process.env.BRASIL_NFE_TOKEN = 'tok'
+        process.env.BRASIL_NFE_AMBIENTE = '2'
+    })
+    afterEach(() => {
+        vi.unstubAllGlobals()
+        vi.restoreAllMocks()
+    })
+
+    const itens: ItemNFCe[] = [
+        { codigo: 'A', nome: 'Item', quantidade: 1, valorUnitario: 10, unidade: 'UN' },
+    ]
+
+    it.each([
+        ['dinheiro', '01'],
+        ['credito', '03'],
+        ['debito', '04'],
+        ['pix', '17'],
+        ['voucher', '99'],
+    ])('forma "%s" → tPag %s', async (forma, esperado) => {
+        const calls = mockFetchCapturing()
+        const res = await emitirNFCe({ itens, total: 10, formaPagamento: forma })
+        expect(res.ok).toBe(true)
+        expect(calls[0].body.Pagamentos[0].FormaPagamento).toBe(esperado)
+    })
+})
+
 // Regressão "CSOSN indevido" (Suco Laranja Prats 300 cadastrado como 0900) e
 // "Rejeição 806" (sucos como 0500 sem CEST): a emissão só sabe montar o ICMS do
 // CSOSN 102. Qualquer outro código deve ser coagido para 102, em vez de derrubar

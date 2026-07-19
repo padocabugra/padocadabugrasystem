@@ -12,7 +12,7 @@ import { useThermalPrinter } from '@/components/shared/ThermalPrinterContext'
 
 // Rótulos das formas de pagamento (espelha o Caixa) — usado na reimpressão.
 const FORMA_PAGAMENTO_LABEL: Record<string, string> = {
-    dinheiro: 'Dinheiro', pix: 'PIX', debito: 'Cartão Débito', credito: 'Cartão Crédito',
+    dinheiro: 'Dinheiro', pix: 'PIX', debito: 'Cartão Débito', credito: 'Cartão Crédito', voucher: 'Voucher',
 }
 
 interface ItemEdit {
