@@ -4,16 +4,17 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
     BarChart3, Package, Warehouse, Landmark, CalendarDays,
     Download, ChevronDown, TrendingUp, TrendingDown,
-    AlertTriangle, RefreshCw, FileText, FileSpreadsheet,
+    AlertTriangle, RefreshCw, FileText, FileSpreadsheet, Receipt,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/formatters'
-import { exportToCSV, exportToPDF } from '@/lib/export-utils'
+import { exportToCSV, exportToPDF, exportNotasFiscaisPDF } from '@/lib/export-utils'
+import { montarLinhasNotas, type NotaFiscalRaw } from '@/lib/chave-nfce'
 import { toast } from 'sonner'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type AbaAtiva = 'vendas' | 'produtos' | 'estoque' | 'caixa'
+type AbaAtiva = 'vendas' | 'produtos' | 'estoque' | 'caixa' | 'notas'
 
 interface MetricaVenda {
     data: string
@@ -215,6 +216,7 @@ export default function RelatoriosPage() {
     const [curvaABC, setCurvaABC] = useState<CurvaABC[]>([])
     const [auditoriaCaixa, setAuditoriaCaixa] = useState<AuditoriaCaixa[]>([])
     const [ajustesEstoque, setAjustesEstoque] = useState<AjusteEstoque[]>([])
+    const [notasFiscais, setNotasFiscais] = useState<NotaFiscalRaw[]>([])
 
     const periodoLabel = `${formatDate(dataInicio)} a ${formatDate(dataFim)}`
 
@@ -256,11 +258,25 @@ export default function RelatoriosPage() {
         else setAjustesEstoque((data ?? []) as AjusteEstoque[])
     }, [supabase, dataInicio, dataFim])
 
+    const fetchNotas = useCallback(async () => {
+        // Notas fiscais AUTORIZADAS (nfce_status='emitida') no período — é o que
+        // vale pra contabilidade. Número/série são derivados da chave na exibição.
+        const { data, error } = await supabase
+            .from('pedidos')
+            .select('id, created_at, chave_nfce, total, nfce_status')
+            .eq('nfce_status', 'emitida')
+            .gte('created_at', `${dataInicio}T00:00:00-04:00`)
+            .lte('created_at', `${dataFim}T23:59:59-04:00`)
+            .order('created_at', { ascending: true })
+        if (error) toast.error('Erro ao carregar notas fiscais')
+        else setNotasFiscais((data ?? []) as NotaFiscalRaw[])
+    }, [supabase, dataInicio, dataFim])
+
     const fetchAll = useCallback(async () => {
         setLoading(true)
-        await Promise.all([fetchVendas(), fetchProdutos(), fetchCaixa(), fetchEstoque()])
+        await Promise.all([fetchVendas(), fetchProdutos(), fetchCaixa(), fetchEstoque(), fetchNotas()])
         setLoading(false)
-    }, [fetchVendas, fetchProdutos, fetchCaixa, fetchEstoque])
+    }, [fetchVendas, fetchProdutos, fetchCaixa, fetchEstoque, fetchNotas])
 
     useEffect(() => { fetchAll() }, [fetchAll])
 
@@ -280,6 +296,10 @@ export default function RelatoriosPage() {
 
         return { totalFat, totalCusto, totalVendas, ticketMedio, margem, dinheiro, pix, debito, credito, voucher }
     }, [metricasVendas])
+
+    // ── Resumo Notas Fiscais ─────────────────────────────────────────────────
+
+    const resumoNotas = useMemo(() => montarLinhasNotas(notasFiscais), [notasFiscais])
 
     // ── Exportações ──────────────────────────────────────────────────────────
 
@@ -428,6 +448,34 @@ export default function RelatoriosPage() {
         toast.success('PDF de Caixa exportado')
     }
 
+    function exportNotasCSV() {
+        const rows = resumoNotas.linhas.map((l) => ({
+            Data: l.data,
+            Hora: l.hora,
+            Número: l.numero,
+            Série: l.serie,
+            'Chave de Acesso': l.chave,
+            Valor: l.valor.toFixed(2),
+            Situação: l.situacao,
+        }))
+        exportToCSV(rows, { filename: `notas_fiscais_${dataInicio}_a_${dataFim}`, title: 'Notas Fiscais' })
+        toast.success('CSV de Notas Fiscais exportado')
+    }
+
+    function exportNotasPDF() {
+        if (resumoNotas.linhas.length === 0) {
+            toast.error('Nenhuma nota emitida no período para exportar')
+            return
+        }
+        exportNotasFiscaisPDF(resumoNotas.linhas, {
+            empresa: process.env.NEXT_PUBLIC_EMPRESA_RAZAO_SOCIAL || 'PADOCA DA BUGRA',
+            cnpj: process.env.NEXT_PUBLIC_EMPRESA_CNPJ || undefined,
+            periodo: periodoLabel,
+            filename: `notas_fiscais_${dataInicio}_a_${dataFim}`,
+        })
+        toast.success('PDF de Notas Fiscais exportado')
+    }
+
     // ── TABS ─────────────────────────────────────────────────────────────────
 
     const ABAS: { key: AbaAtiva; label: string; icon: React.ReactNode }[] = [
@@ -435,6 +483,7 @@ export default function RelatoriosPage() {
         { key: 'produtos', label: 'Produtos', icon: <Package className="w-4 h-4" /> },
         { key: 'estoque', label: 'Estoque', icon: <Warehouse className="w-4 h-4" /> },
         { key: 'caixa', label: 'Caixa', icon: <Landmark className="w-4 h-4" /> },
+        { key: 'notas', label: 'Notas Fiscais', icon: <Receipt className="w-4 h-4" /> },
     ]
 
     // ── Render ────────────────────────────────────────────────────────────────
@@ -804,6 +853,86 @@ export default function RelatoriosPage() {
                                         )
                                     })}
                                 </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ═══════ ABA: NOTAS FISCAIS ═══════ */}
+            {!loading && abaAtiva === 'notas' && (
+                <div className="space-y-4">
+                    {/* KPIs */}
+                    <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+                        <div className="rounded-xl border p-4 bg-blue-50 text-blue-700 border-blue-100">
+                            <p className="text-xs font-semibold opacity-70">Notas Emitidas</p>
+                            <p className="text-2xl font-extrabold mt-1">{resumoNotas.quantidade}</p>
+                        </div>
+                        <div className="rounded-xl border p-4 bg-emerald-50 text-emerald-700 border-emerald-100">
+                            <p className="text-xs font-semibold opacity-70">Valor Total</p>
+                            <p className="text-2xl font-extrabold mt-1">{formatCurrency(resumoNotas.total)}</p>
+                        </div>
+                        <div className="rounded-xl border p-4 bg-gray-50 text-gray-700 border-gray-100">
+                            <p className="text-xs font-semibold opacity-70">Ticket Médio da Nota</p>
+                            <p className="text-2xl font-extrabold mt-1">
+                                {formatCurrency(resumoNotas.quantidade > 0 ? resumoNotas.total / resumoNotas.quantidade : 0)}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+                            <div>
+                                <h3 className="text-sm font-bold text-gray-700">Notas Fiscais Emitidas (NFC-e)</h3>
+                                <p className="text-[11px] text-gray-400 mt-0.5">
+                                    Notas autorizadas no período — pronto para enviar à contabilidade
+                                </p>
+                            </div>
+                            <ExportDropdown onCSV={exportNotasCSV} onPDF={exportNotasPDF} />
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-gray-50/80 border-b text-xs text-gray-500 uppercase tracking-wider">
+                                    <tr>
+                                        <th className="px-3 py-2.5 font-semibold">Data</th>
+                                        <th className="px-3 py-2.5 font-semibold">Hora</th>
+                                        <th className="px-3 py-2.5 font-semibold text-right">Número</th>
+                                        <th className="px-3 py-2.5 font-semibold text-center">Série</th>
+                                        <th className="px-3 py-2.5 font-semibold">Chave de Acesso</th>
+                                        <th className="px-3 py-2.5 font-semibold text-right">Valor</th>
+                                        <th className="px-3 py-2.5 font-semibold text-center">Situação</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-50">
+                                    {resumoNotas.linhas.length === 0 ? (
+                                        <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">Nenhuma nota fiscal emitida no período</td></tr>
+                                    ) : resumoNotas.linhas.map((l) => (
+                                        <tr key={l.id} className="hover:bg-blue-50/30">
+                                            <td className="px-3 py-2.5 font-medium whitespace-nowrap">{l.data}</td>
+                                            <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">{l.hora}</td>
+                                            <td className="px-3 py-2.5 text-right font-semibold text-gray-800">{l.numero}</td>
+                                            <td className="px-3 py-2.5 text-center text-gray-600">{l.serie}</td>
+                                            <td className="px-3 py-2.5 font-mono text-[11px] text-gray-600 whitespace-nowrap">{l.chave}</td>
+                                            <td className="px-3 py-2.5 text-right font-semibold">{formatCurrency(l.valor)}</td>
+                                            <td className="px-3 py-2.5 text-center">
+                                                <span className="inline-flex px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-[10px] font-bold">
+                                                    {l.situacao}
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                                {resumoNotas.linhas.length > 0 && (
+                                    <tfoot className="border-t-2 border-gray-100 bg-gray-50/60">
+                                        <tr>
+                                            <td className="px-3 py-2.5 font-bold text-gray-700" colSpan={5}>
+                                                TOTAL — {resumoNotas.quantidade} nota(s)
+                                            </td>
+                                            <td className="px-3 py-2.5 text-right font-extrabold text-gray-900">{formatCurrency(resumoNotas.total)}</td>
+                                            <td />
+                                        </tr>
+                                    </tfoot>
+                                )}
                             </table>
                         </div>
                     </div>
