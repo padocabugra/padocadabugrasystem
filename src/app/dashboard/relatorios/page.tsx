@@ -8,8 +8,9 @@ import {
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/formatters'
-import { exportToCSV, exportToPDF, exportNotasFiscaisPDF } from '@/lib/export-utils'
+import { exportToCSV, exportToPDF, exportNotasFiscaisPDF, gerarNotasFiscaisPDFBlob } from '@/lib/export-utils'
 import { montarLinhasNotas, type NotaFiscalRaw } from '@/lib/chave-nfce'
+import { mesFechado, rotuloPeriodoArquivo } from '@/lib/periodo'
 import { toast } from 'sonner'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -92,6 +93,7 @@ function getDefaultDates() {
     inicio.setDate(inicio.getDate() - 30)
     return { inicio: formatDateISO(inicio), fim: formatDateISO(fim) }
 }
+
 
 // ─── Componente: Dropdown de Exportação ──────────────────────────────────────
 
@@ -218,6 +220,7 @@ export default function RelatoriosPage() {
     const [ajustesEstoque, setAjustesEstoque] = useState<AjusteEstoque[]>([])
     const [notasFiscais, setNotasFiscais] = useState<NotaFiscalRaw[]>([])
     const [baixandoXmls, setBaixandoXmls] = useState(false)
+    const [baixandoPacote, setBaixandoPacote] = useState(false)
 
     const periodoLabel = `${formatDate(dataInicio)} a ${formatDate(dataFim)}`
 
@@ -477,6 +480,58 @@ export default function RelatoriosPage() {
         toast.success('PDF de Notas Fiscais exportado')
     }
 
+    // PACOTE DA CONTABILIDADE — o envio mensal em UM clique: pega o ZIP de XMLs
+    // da rota (mesma fonte do botão de XMLs) e embute o relatório PDF dentro
+    // dele, entregando um único arquivo pronto pra encaminhar ao contador.
+    async function baixarPacoteContabilidade() {
+        if (resumoNotas.linhas.length === 0) {
+            toast.error('Nenhuma nota emitida no período')
+            return
+        }
+        setBaixandoPacote(true)
+        try {
+            const res = await fetch(`/api/nfce/xmls?inicio=${dataInicio}&fim=${dataFim}`)
+            if (!res.ok) {
+                const j = await res.json().catch(() => ({}))
+                toast.error(j?.erro || 'Falha ao montar o pacote')
+                return
+            }
+            const total = Number(res.headers.get('X-Notas-Total') || 0)
+            const comXml = Number(res.headers.get('X-Notas-Com-Xml') || 0)
+
+            const rotulo = rotuloPeriodoArquivo(dataInicio, dataFim)
+            // jszip só é carregado quando o botão é usado (não pesa o bundle).
+            const JSZip = (await import('jszip')).default
+            const zip = await JSZip.loadAsync(await res.blob())
+
+            const pdf = gerarNotasFiscaisPDFBlob(resumoNotas.linhas, {
+                empresa: process.env.NEXT_PUBLIC_EMPRESA_RAZAO_SOCIAL || 'PADOCA DA BUGRA',
+                cnpj: process.env.NEXT_PUBLIC_EMPRESA_CNPJ || undefined,
+                periodo: periodoLabel,
+                filename: `relatorio-notas-${rotulo}`,
+            })
+            zip.file(`relatorio-notas-${rotulo}.pdf`, pdf)
+
+            const blobFinal = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' })
+            const url = URL.createObjectURL(blobFinal)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `contabilidade-${rotulo}.zip`
+            a.click()
+            URL.revokeObjectURL(url)
+
+            if (comXml < total) {
+                toast.warning(`Pacote pronto (${comXml}/${total} notas com XML — as demais são anteriores à captura).`)
+            } else {
+                toast.success(`Pacote da contabilidade pronto: ${total} nota(s) + relatório.`)
+            }
+        } catch {
+            toast.error('Erro ao montar o pacote da contabilidade')
+        } finally {
+            setBaixandoPacote(false)
+        }
+    }
+
     // Baixa os XMLs autorizados do período num .zip (rota server-side monta o
     // pacote). Avisa quando parte das notas não tem XML (anteriores à captura).
     async function baixarXmlsZip() {
@@ -569,7 +624,7 @@ export default function RelatoriosPage() {
                         className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-200 outline-none"
                     />
                 </div>
-                <div className="flex gap-1.5 ml-auto">
+                <div className="flex flex-wrap gap-1.5 ml-auto">
                     {[
                         { label: '7d', days: 7 },
                         { label: '15d', days: 15 },
@@ -586,6 +641,23 @@ export default function RelatoriosPage() {
                                 setDataFim(formatDateISO(fim))
                             }}
                             className="px-2.5 py-1 text-xs font-semibold text-gray-600 bg-gray-50 hover:bg-blue-50 hover:text-blue-600 border border-gray-200 rounded-lg transition-colors"
+                        >
+                            {p.label}
+                        </button>
+                    ))}
+                    {/* Mês FECHADO (1 → último dia) — é como a contabilidade trabalha. */}
+                    {[
+                        { label: 'Este mês', offset: 0 },
+                        { label: 'Mês passado', offset: -1 },
+                    ].map((p) => (
+                        <button
+                            key={p.label}
+                            onClick={() => {
+                                const m = mesFechado(p.offset)
+                                setDataInicio(m.inicio)
+                                setDataFim(m.fim)
+                            }}
+                            className="px-2.5 py-1 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors"
                         >
                             {p.label}
                         </button>
@@ -925,15 +997,25 @@ export default function RelatoriosPage() {
                                     Notas autorizadas no período — pronto para enviar à contabilidade
                                 </p>
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center justify-end gap-2">
+                                {/* Ação principal do envio mensal: relatório + XMLs num arquivo só. */}
+                                <button
+                                    onClick={baixarPacoteContabilidade}
+                                    disabled={baixandoPacote}
+                                    title="Baixa UM arquivo .zip com o relatório em PDF + os XMLs do período — pronto para encaminhar ao contador"
+                                    className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors disabled:opacity-50 shadow-sm"
+                                >
+                                    {baixandoPacote ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Package className="w-3.5 h-3.5" />}
+                                    Pacote da Contabilidade
+                                </button>
                                 <button
                                     onClick={baixarXmlsZip}
                                     disabled={baixandoXmls}
-                                    title="Baixa os arquivos XML (documento fiscal) do período em um .zip"
-                                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
+                                    title="Baixa somente os arquivos XML (documento fiscal) do período"
+                                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-700 bg-white border border-blue-200 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
                                 >
                                     {baixandoXmls ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                                    Baixar XMLs (ZIP)
+                                    Só XMLs
                                 </button>
                                 <ExportDropdown onCSV={exportNotasCSV} onPDF={exportNotasPDF} />
                             </div>

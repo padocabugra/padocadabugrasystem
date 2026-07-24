@@ -117,7 +117,7 @@ interface NotasFiscaisPdfConfig {
  * pra caber numa linha só — sem quebra, sem estouro. Fecha com uma linha de
  * TOTAIS (quantidade de notas + soma dos valores).
  */
-export function exportNotasFiscaisPDF(linhas: LinhaNotaFiscal[], config: NotasFiscaisPdfConfig) {
+function montarNotasFiscaisPDF(linhas: LinhaNotaFiscal[], config: NotasFiscaisPdfConfig): jsPDF {
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
     const pageW = doc.internal.pageSize.getWidth()
 
@@ -199,5 +199,18 @@ export function exportNotasFiscaisPDF(linhas: LinhaNotaFiscal[], config: NotasFi
         )
     }
 
-    doc.save(`${config.filename}.pdf`)
+    return doc
+}
+
+/** Gera e BAIXA o relatório de notas em PDF. */
+export function exportNotasFiscaisPDF(linhas: LinhaNotaFiscal[], config: NotasFiscaisPdfConfig) {
+    montarNotasFiscaisPDF(linhas, config).save(`${config.filename}.pdf`)
+}
+
+/**
+ * Mesmo PDF, porém devolvido como Blob (sem baixar) — usado pra embutir o
+ * relatório dentro do ZIP do "Pacote da Contabilidade".
+ */
+export function gerarNotasFiscaisPDFBlob(linhas: LinhaNotaFiscal[], config: NotasFiscaisPdfConfig): Blob {
+    return montarNotasFiscaisPDF(linhas, config).output('blob')
 }
