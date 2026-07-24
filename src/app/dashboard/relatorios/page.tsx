@@ -217,6 +217,7 @@ export default function RelatoriosPage() {
     const [auditoriaCaixa, setAuditoriaCaixa] = useState<AuditoriaCaixa[]>([])
     const [ajustesEstoque, setAjustesEstoque] = useState<AjusteEstoque[]>([])
     const [notasFiscais, setNotasFiscais] = useState<NotaFiscalRaw[]>([])
+    const [baixandoXmls, setBaixandoXmls] = useState(false)
 
     const periodoLabel = `${formatDate(dataInicio)} a ${formatDate(dataFim)}`
 
@@ -474,6 +475,42 @@ export default function RelatoriosPage() {
             filename: `notas_fiscais_${dataInicio}_a_${dataFim}`,
         })
         toast.success('PDF de Notas Fiscais exportado')
+    }
+
+    // Baixa os XMLs autorizados do período num .zip (rota server-side monta o
+    // pacote). Avisa quando parte das notas não tem XML (anteriores à captura).
+    async function baixarXmlsZip() {
+        if (resumoNotas.linhas.length === 0) {
+            toast.error('Nenhuma nota emitida no período')
+            return
+        }
+        setBaixandoXmls(true)
+        try {
+            const res = await fetch(`/api/nfce/xmls?inicio=${dataInicio}&fim=${dataFim}`)
+            if (!res.ok) {
+                const j = await res.json().catch(() => ({}))
+                toast.error(j?.erro || 'Falha ao gerar os XMLs')
+                return
+            }
+            const total = Number(res.headers.get('X-Notas-Total') || 0)
+            const comXml = Number(res.headers.get('X-Notas-Com-Xml') || 0)
+            const blob = await res.blob()
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `notas-xml-${dataInicio}-a-${dataFim}.zip`
+            a.click()
+            URL.revokeObjectURL(url)
+            if (comXml < total) {
+                toast.warning(`${comXml}/${total} notas com XML. As demais são anteriores à captura — baixe pelo portal.`)
+            } else {
+                toast.success(`${comXml} XML(s) exportado(s)`)
+            }
+        } catch {
+            toast.error('Erro ao baixar os XMLs')
+        } finally {
+            setBaixandoXmls(false)
+        }
     }
 
     // ── TABS ─────────────────────────────────────────────────────────────────
@@ -888,7 +925,18 @@ export default function RelatoriosPage() {
                                     Notas autorizadas no período — pronto para enviar à contabilidade
                                 </p>
                             </div>
-                            <ExportDropdown onCSV={exportNotasCSV} onPDF={exportNotasPDF} />
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={baixarXmlsZip}
+                                    disabled={baixandoXmls}
+                                    title="Baixa os arquivos XML (documento fiscal) do período em um .zip"
+                                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
+                                >
+                                    {baixandoXmls ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                                    Baixar XMLs (ZIP)
+                                </button>
+                                <ExportDropdown onCSV={exportNotasCSV} onPDF={exportNotasPDF} />
+                            </div>
                         </div>
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm text-left">

@@ -116,6 +116,10 @@ export interface ResultadoNFCe {
     qrCodeUrl?: string
     /** URL de consulta por chave (<urlChave> do XML), p/ o rodapé do cupom. */
     urlChave?: string
+    /** XML autorizado da NFC-e em Base64 (campo Base64Xml da resposta). É o
+     *  documento fiscal que a contabilidade importa. Persistido pela rota de
+     *  emissão em nfce_documentos. undefined se o emissor não devolver. */
+    xmlBase64?: string
     erro?: string
 }
 
@@ -333,9 +337,13 @@ export async function emitirNFCe(dados: DadosNFCe): Promise<ResultadoNFCe> {
         }
 
         // QR-Code oficial: vem dentro do XML autorizado (Base64Xml → infNFeSupl).
-        const { qrCodeUrl, urlChave } = extrairQrCodeNFCe(json?.Base64Xml)
+        const base64Xml: string | undefined =
+            typeof json?.Base64Xml === 'string' && json.Base64Xml.length > 0 ? json.Base64Xml : undefined
+        const { qrCodeUrl, urlChave } = extrairQrCodeNFCe(base64Xml)
 
-        return { ok: true, chaveAcesso, protocolo, qrCodeUrl, urlChave }
+        // Guarda o XML autorizado (base64) pra contabilidade. A rota de emissão
+        // persiste em nfce_documentos.
+        return { ok: true, chaveAcesso, protocolo, qrCodeUrl, urlChave, xmlBase64: base64Xml }
     } catch (err: any) {
         return { ok: false, erro: err?.message ?? 'Erro desconhecido ao conectar com Brasil NFe' }
     }

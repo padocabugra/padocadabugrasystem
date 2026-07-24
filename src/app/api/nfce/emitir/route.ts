@@ -92,6 +92,24 @@ export async function POST(req: Request) {
                 .in('id', ids)
         }
 
+        // ── Persiste o XML autorizado (p/ a contabilidade) ───────────────
+        // Best-effort: a nota JÁ foi autorizada na SEFAZ; se guardar o XML
+        // falhar, NÃO derruba a venda — apenas registra no log. Upsert por
+        // chave (uma conta com vários pedidos = uma nota = um XML).
+        if (resultado.ok && resultado.chaveAcesso && resultado.xmlBase64) {
+            try {
+                const { error: xmlErr } = await supabase
+                    .from('nfce_documentos')
+                    .upsert(
+                        { chave: resultado.chaveAcesso, xml_base64: resultado.xmlBase64 },
+                        { onConflict: 'chave' }
+                    )
+                if (xmlErr) console.error('[nfce/emitir] falha ao salvar XML:', xmlErr.message)
+            } catch (e) {
+                console.error('[nfce/emitir] erro inesperado ao salvar XML:', e)
+            }
+        }
+
         return NextResponse.json(resultado)
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : 'Erro interno na emissão de NFC-e.'

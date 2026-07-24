@@ -262,6 +262,8 @@ describe('emitirNFCe — propaga o qrCodeUrl quando a Brasil NFe devolve o XML',
         const res = await emitirNFCe({ itens, total: 5, formaPagamento: 'dinheiro' })
         expect(res.ok).toBe(true)
         expect(res.qrCodeUrl).toBe(QR_URL)
+        // O XML autorizado (Base64Xml) é devolvido cru para persistência.
+        expect(res.xmlBase64).toBe(b64(xmlAutorizado(QR_URL)))
     })
 
     it('sem Base64Xml na resposta, qrCodeUrl fica undefined (sem quebrar)', async () => {
@@ -277,5 +279,7 @@ describe('emitirNFCe — propaga o qrCodeUrl quando a Brasil NFe devolve o XML',
         const res = await emitirNFCe({ itens, total: 5, formaPagamento: 'dinheiro' })
         expect(res.ok).toBe(true)
         expect(res.qrCodeUrl).toBeUndefined()
+        // Sem Base64Xml na resposta, xmlBase64 fica undefined (não quebra).
+        expect(res.xmlBase64).toBeUndefined()
     })
 })
