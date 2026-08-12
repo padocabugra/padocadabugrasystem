@@ -3,6 +3,7 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { formatCurrency } from './formatters'
 import type { LinhaNotaFiscal } from './chave-nfce'
+import type { ResumoCompras } from './compras'
 
 interface ExportConfig {
     filename: string
@@ -213,4 +214,155 @@ export function exportNotasFiscaisPDF(linhas: LinhaNotaFiscal[], config: NotasFi
  */
 export function gerarNotasFiscaisPDFBlob(linhas: LinhaNotaFiscal[], config: NotasFiscaisPdfConfig): Blob {
     return montarNotasFiscaisPDF(linhas, config).output('blob')
+}
+
+// ─── Relatório de Notas de COMPRA (entradas) ─────────────────────────────────
+
+interface ComprasPdfConfig {
+    empresa: string
+    cnpj?: string
+    periodo: string
+    filename: string
+}
+
+/**
+ * PDF do relatório de notas de compra, no formato que a contabilidade espera:
+ * A4 RETRATO, uma linha por NOTA, larguras de coluna fixas (nada cortado),
+ * total geral, um resumo por fornecedor e — importante — as ressalvas de
+ * lançamento (itens sem preço, entradas sem NF, fornecedor divergente)
+ * declaradas no rodapé, para o relatório não induzir a leitura errada.
+ */
+export function exportComprasPDF(resumo: ResumoCompras, config: ComprasPdfConfig) {
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+    const pageW = doc.internal.pageSize.getWidth()
+
+    // ── Cabeçalho timbrado ──
+    doc.setFontSize(14)
+    doc.setFont('helvetica', 'bold')
+    doc.text(config.empresa, 14, 15)
+
+    if (config.cnpj) {
+        doc.setFontSize(9)
+        doc.setFont('helvetica', 'normal')
+        doc.setTextColor(90, 90, 90)
+        doc.text(`CNPJ: ${config.cnpj}`, 14, 20.5)
+    }
+
+    doc.setFontSize(12)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(20, 20, 20)
+    doc.text('Relatório de Notas de Compra (Entradas)', 14, config.cnpj ? 27 : 23)
+
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor(100, 100, 100)
+    doc.text(`Período: ${config.periodo}`, 14, config.cnpj ? 32.5 : 28.5)
+
+    doc.setFontSize(7)
+    doc.setTextColor(150, 150, 150)
+    doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, pageW - 14, 15, { align: 'right' })
+
+    // ── Tabela 1: as notas ──
+    autoTable(doc, {
+        startY: config.cnpj ? 37 : 33,
+        head: [['Data', 'Nº da Nota', 'Fornecedor', 'Itens', 'Valor (R$)']],
+        body: resumo.notas.map((n) => [
+            n.data,
+            n.numero,
+            n.fornecedor,
+            n.itensSemValor > 0 ? `${n.qtdItens} (${n.itensSemValor}*)` : String(n.qtdItens),
+            formatCurrency(n.valor),
+        ]),
+        foot: [[
+            { content: `TOTAL — ${resumo.qtdNotas} nota(s)`, colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } },
+            { content: formatCurrency(resumo.total), styles: { halign: 'right', fontStyle: 'bold' } },
+        ]],
+        theme: 'grid',
+        headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold', fontSize: 8.5, halign: 'left' },
+        footStyles: { fillColor: [235, 240, 250], textColor: 20, fontSize: 9 },
+        bodyStyles: { fontSize: 8.5, cellPadding: 2.2, overflow: 'linebreak' },
+        alternateRowStyles: { fillColor: [246, 248, 251] },
+        margin: { top: 12, left: 14, right: 14 },
+        // 182 mm úteis (A4 retrato menos as margens)
+        columnStyles: {
+            0: { cellWidth: 24 },                     // Data
+            1: { cellWidth: 30 },                     // Nº da nota
+            2: { cellWidth: 74 },                     // Fornecedor
+            3: { cellWidth: 18, halign: 'center' },   // Itens
+            4: { cellWidth: 36, halign: 'right' },    // Valor
+        },
+    })
+
+    // ── Tabela 2: resumo por fornecedor ──
+    const posTabela1 = (doc as any).lastAutoTable?.finalY ?? 40
+    autoTable(doc, {
+        startY: posTabela1 + 10,
+        head: [['Resumo por Fornecedor', 'Notas', 'Valor (R$)']],
+        body: resumo.porFornecedor.map((f) => [f.fornecedor, String(f.notas), formatCurrency(f.valor)]),
+        foot: [[
+            { content: `${resumo.qtdFornecedores} fornecedor(es)`, styles: { halign: 'right', fontStyle: 'bold' } },
+            { content: String(resumo.qtdNotas), styles: { halign: 'center', fontStyle: 'bold' } },
+            { content: formatCurrency(resumo.total), styles: { halign: 'right', fontStyle: 'bold' } },
+        ]],
+        theme: 'grid',
+        headStyles: { fillColor: [71, 85, 105], textColor: 255, fontStyle: 'bold', fontSize: 8.5, halign: 'left' },
+        footStyles: { fillColor: [241, 245, 249], textColor: 20, fontSize: 8.5 },
+        bodyStyles: { fontSize: 8.5, cellPadding: 2, overflow: 'linebreak' },
+        margin: { top: 12, left: 14, right: 14 },
+        columnStyles: {
+            0: { cellWidth: 110 },
+            1: { cellWidth: 24, halign: 'center' },
+            2: { cellWidth: 48, halign: 'right' },
+        },
+    })
+
+    // ── Ressalvas (só aparecem quando existem) ──
+    const avisos: string[] = []
+    if (resumo.itensSemValor > 0) {
+        avisos.push(`* ${resumo.itensSemValor} item(ns) foram lançados sem preço — nessas notas o valor está subestimado.`)
+    }
+    if (resumo.semNf.itens > 0) {
+        avisos.push(`Há ${resumo.semNf.itens} entrada(s) de estoque sem número de nota (${formatCurrency(resumo.semNf.valor)}), não incluídas neste relatório.`)
+    }
+    if (resumo.notasComDivergencia > 0) {
+        avisos.push(`${resumo.notasComDivergencia} nota(s) tiveram o fornecedor digitado de formas diferentes; foi adotada a grafia mais frequente.`)
+    }
+
+    if (avisos.length > 0) {
+        let y = ((doc as any).lastAutoTable?.finalY ?? 60) + 8
+        if (y > doc.internal.pageSize.getHeight() - 30) {
+            doc.addPage()
+            y = 20
+        }
+        doc.setFontSize(8)
+        doc.setFont('helvetica', 'bold')
+        doc.setTextColor(120, 80, 0)
+        doc.text('Observações', 14, y)
+        doc.setFont('helvetica', 'normal')
+        doc.setTextColor(110, 110, 110)
+        for (const aviso of avisos) {
+            y += 4.5
+            for (const linha of doc.splitTextToSize(`• ${aviso}`, pageW - 28)) {
+                doc.text(linha, 14, y)
+                y += 4
+            }
+            y -= 4
+        }
+    }
+
+    // ── Rodapé ──
+    const pageCount = (doc as any).internal.getNumberOfPages()
+    for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i)
+        doc.setFontSize(7)
+        doc.setTextColor(150)
+        doc.text(
+            `Página ${i} de ${pageCount}`,
+            pageW / 2,
+            doc.internal.pageSize.getHeight() - 8,
+            { align: 'center' }
+        )
+    }
+
+    doc.save(`${config.filename}.pdf`)
 }

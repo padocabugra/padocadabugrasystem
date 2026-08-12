@@ -4,18 +4,19 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
     BarChart3, Package, Warehouse, Landmark, CalendarDays,
     Download, ChevronDown, TrendingUp, TrendingDown,
-    AlertTriangle, RefreshCw, FileText, FileSpreadsheet, Receipt,
+    AlertTriangle, RefreshCw, FileText, FileSpreadsheet, Receipt, ShoppingCart,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/formatters'
-import { exportToCSV, exportToPDF, exportNotasFiscaisPDF, gerarNotasFiscaisPDFBlob } from '@/lib/export-utils'
+import { exportToCSV, exportToPDF, exportNotasFiscaisPDF, gerarNotasFiscaisPDFBlob, exportComprasPDF } from '@/lib/export-utils'
+import { resumirCompras, type CompraRaw } from '@/lib/compras'
 import { montarLinhasNotas, type NotaFiscalRaw } from '@/lib/chave-nfce'
 import { mesFechado, rotuloPeriodoArquivo } from '@/lib/periodo'
 import { toast } from 'sonner'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type AbaAtiva = 'vendas' | 'produtos' | 'estoque' | 'caixa' | 'notas'
+type AbaAtiva = 'vendas' | 'produtos' | 'estoque' | 'caixa' | 'notas' | 'compras'
 
 interface MetricaVenda {
     data: string
@@ -219,6 +220,7 @@ export default function RelatoriosPage() {
     const [auditoriaCaixa, setAuditoriaCaixa] = useState<AuditoriaCaixa[]>([])
     const [ajustesEstoque, setAjustesEstoque] = useState<AjusteEstoque[]>([])
     const [notasFiscais, setNotasFiscais] = useState<NotaFiscalRaw[]>([])
+    const [comprasRaw, setComprasRaw] = useState<CompraRaw[]>([])
     const [baixandoXmls, setBaixandoXmls] = useState(false)
     const [baixandoPacote, setBaixandoPacote] = useState(false)
 
@@ -276,11 +278,21 @@ export default function RelatoriosPage() {
         else setNotasFiscais((data ?? []) as NotaFiscalRaw[])
     }, [supabase, dataInicio, dataFim])
 
+    // Notas de COMPRA (entradas de estoque) — a RPC já consolida por nota.
+    const fetchCompras = useCallback(async () => {
+        const { data, error } = await supabase.rpc('fn_relatorio_compras', {
+            p_data_inicio: dataInicio,
+            p_data_fim: dataFim,
+        })
+        if (error) toast.error('Erro ao carregar notas de compra')
+        else setComprasRaw((data ?? []) as CompraRaw[])
+    }, [supabase, dataInicio, dataFim])
+
     const fetchAll = useCallback(async () => {
         setLoading(true)
-        await Promise.all([fetchVendas(), fetchProdutos(), fetchCaixa(), fetchEstoque(), fetchNotas()])
+        await Promise.all([fetchVendas(), fetchProdutos(), fetchCaixa(), fetchEstoque(), fetchNotas(), fetchCompras()])
         setLoading(false)
-    }, [fetchVendas, fetchProdutos, fetchCaixa, fetchEstoque, fetchNotas])
+    }, [fetchVendas, fetchProdutos, fetchCaixa, fetchEstoque, fetchNotas, fetchCompras])
 
     useEffect(() => { fetchAll() }, [fetchAll])
 
@@ -304,6 +316,10 @@ export default function RelatoriosPage() {
     // ── Resumo Notas Fiscais ─────────────────────────────────────────────────
 
     const resumoNotas = useMemo(() => montarLinhasNotas(notasFiscais), [notasFiscais])
+
+    // ── Resumo Compras (entradas) ────────────────────────────────────────────
+
+    const resumoCompras = useMemo(() => resumirCompras(comprasRaw), [comprasRaw])
 
     // ── Exportações ──────────────────────────────────────────────────────────
 
@@ -568,6 +584,40 @@ export default function RelatoriosPage() {
         }
     }
 
+    function exportComprasCSV() {
+        if (resumoCompras.qtdNotas === 0) {
+            toast.error('Nenhuma nota de compra no período')
+            return
+        }
+        const rows = resumoCompras.notas.map((n) => ({
+            Data: n.data,
+            'Nº da Nota': n.numero,
+            Fornecedor: n.fornecedor,
+            Itens: n.qtdItens,
+            'Itens sem valor': n.itensSemValor,
+            Valor: n.valor.toFixed(2),
+        }))
+        exportToCSV(rows, {
+            filename: `compras_${rotuloPeriodoArquivo(dataInicio, dataFim)}`,
+            title: 'Notas de Compra',
+        })
+        toast.success('CSV de Compras exportado')
+    }
+
+    function exportComprasPdf() {
+        if (resumoCompras.qtdNotas === 0) {
+            toast.error('Nenhuma nota de compra no período')
+            return
+        }
+        exportComprasPDF(resumoCompras, {
+            empresa: process.env.NEXT_PUBLIC_EMPRESA_RAZAO_SOCIAL || 'PADOCA DA BUGRA',
+            cnpj: process.env.NEXT_PUBLIC_EMPRESA_CNPJ || undefined,
+            periodo: periodoLabel,
+            filename: `compras_${rotuloPeriodoArquivo(dataInicio, dataFim)}`,
+        })
+        toast.success('PDF de Compras exportado')
+    }
+
     // ── TABS ─────────────────────────────────────────────────────────────────
 
     const ABAS: { key: AbaAtiva; label: string; icon: React.ReactNode }[] = [
@@ -576,6 +626,7 @@ export default function RelatoriosPage() {
         { key: 'estoque', label: 'Estoque', icon: <Warehouse className="w-4 h-4" /> },
         { key: 'caixa', label: 'Caixa', icon: <Landmark className="w-4 h-4" /> },
         { key: 'notas', label: 'Notas Fiscais', icon: <Receipt className="w-4 h-4" /> },
+        { key: 'compras', label: 'Compras', icon: <ShoppingCart className="w-4 h-4" /> },
     ]
 
     // ── Render ────────────────────────────────────────────────────────────────
@@ -1066,6 +1117,147 @@ export default function RelatoriosPage() {
                             </table>
                         </div>
                     </div>
+                </div>
+            )}
+
+            {/* ═══════ ABA: COMPRAS (notas de entrada) ═══════ */}
+            {!loading && abaAtiva === 'compras' && (
+                <div className="space-y-4">
+                    {/* KPIs */}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                        <div className="rounded-xl border p-4 bg-blue-50 text-blue-700 border-blue-100">
+                            <p className="text-xs font-semibold opacity-70">Total Comprado</p>
+                            <p className="text-2xl font-extrabold mt-1">{formatCurrency(resumoCompras.total)}</p>
+                        </div>
+                        <div className="rounded-xl border p-4 bg-gray-50 text-gray-700 border-gray-100">
+                            <p className="text-xs font-semibold opacity-70">Notas de Compra</p>
+                            <p className="text-2xl font-extrabold mt-1">{resumoCompras.qtdNotas}</p>
+                        </div>
+                        <div className="rounded-xl border p-4 bg-gray-50 text-gray-700 border-gray-100">
+                            <p className="text-xs font-semibold opacity-70">Fornecedores</p>
+                            <p className="text-2xl font-extrabold mt-1">{resumoCompras.qtdFornecedores}</p>
+                        </div>
+                        <div className="rounded-xl border p-4 bg-gray-50 text-gray-700 border-gray-100">
+                            <p className="text-xs font-semibold opacity-70">Valor Médio / Nota</p>
+                            <p className="text-2xl font-extrabold mt-1">
+                                {formatCurrency(resumoCompras.qtdNotas > 0 ? resumoCompras.total / resumoCompras.qtdNotas : 0)}
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Ressalvas de lançamento — o relatório não pode induzir a erro */}
+                    {(resumoCompras.itensSemValor > 0 || resumoCompras.semNf.itens > 0) && (
+                        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 space-y-1">
+                            <p className="text-xs font-bold text-amber-800 flex items-center gap-1.5">
+                                <AlertTriangle className="w-3.5 h-3.5" /> Atenção ao lançamento
+                            </p>
+                            {resumoCompras.itensSemValor > 0 && (
+                                <p className="text-xs text-amber-700">
+                                    <b>{resumoCompras.itensSemValor}</b> item(ns) foram lançados <b>sem preço</b> — nessas notas o valor total está menor que o real.
+                                </p>
+                            )}
+                            {resumoCompras.semNf.itens > 0 && (
+                                <p className="text-xs text-amber-700">
+                                    <b>{resumoCompras.semNf.itens}</b> entrada(s) de estoque <b>sem número de nota</b> ({formatCurrency(resumoCompras.semNf.valor)}) não entram neste relatório.
+                                </p>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Tabela: uma linha por NOTA */}
+                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+                            <div>
+                                <h3 className="text-sm font-bold text-gray-700">Notas de Compra (Entradas)</h3>
+                                <p className="text-[11px] text-gray-400 mt-0.5">
+                                    Compras lançadas no período — para prestação de contas à contabilidade
+                                </p>
+                            </div>
+                            <ExportDropdown onCSV={exportComprasCSV} onPDF={exportComprasPdf} />
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm text-left">
+                                <thead className="bg-gray-50/80 border-b text-xs text-gray-500 uppercase tracking-wider">
+                                    <tr>
+                                        <th className="px-3 py-2.5 font-semibold">Data</th>
+                                        <th className="px-3 py-2.5 font-semibold">Nº da Nota</th>
+                                        <th className="px-3 py-2.5 font-semibold">Fornecedor</th>
+                                        <th className="px-3 py-2.5 font-semibold text-center">Itens</th>
+                                        <th className="px-3 py-2.5 font-semibold text-right">Valor</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-50">
+                                    {resumoCompras.notas.length === 0 ? (
+                                        <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">Nenhuma nota de compra no período</td></tr>
+                                    ) : resumoCompras.notas.map((n, i) => (
+                                        <tr key={`${n.numero}-${i}`} className="hover:bg-blue-50/30">
+                                            <td className="px-3 py-2.5 font-medium whitespace-nowrap">{n.data}</td>
+                                            <td className="px-3 py-2.5 font-semibold text-gray-800">{n.numero}</td>
+                                            <td className="px-3 py-2.5 text-gray-700">
+                                                {n.fornecedor}
+                                                {n.fornecedoresDistintos > 1 && (
+                                                    <span
+                                                        title="Esta nota teve o fornecedor digitado de formas diferentes; foi adotada a grafia mais frequente."
+                                                        className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[9px] font-bold align-middle"
+                                                    >
+                                                        grafia divergente
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td className="px-3 py-2.5 text-center text-gray-600">
+                                                {n.qtdItens}
+                                                {n.itensSemValor > 0 && (
+                                                    <span title={`${n.itensSemValor} item(ns) sem preço lançado`} className="ml-1 text-amber-600 font-bold">
+                                                        ({n.itensSemValor}*)
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td className="px-3 py-2.5 text-right font-semibold">{formatCurrency(n.valor)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                                {resumoCompras.notas.length > 0 && (
+                                    <tfoot className="border-t-2 border-gray-100 bg-gray-50/60">
+                                        <tr>
+                                            <td className="px-3 py-2.5 font-bold text-gray-700" colSpan={4}>
+                                                TOTAL — {resumoCompras.qtdNotas} nota(s)
+                                            </td>
+                                            <td className="px-3 py-2.5 text-right font-extrabold text-gray-900">{formatCurrency(resumoCompras.total)}</td>
+                                        </tr>
+                                    </tfoot>
+                                )}
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* Resumo por fornecedor — conferência rápida */}
+                    {resumoCompras.porFornecedor.length > 0 && (
+                        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                            <div className="px-5 py-3 border-b border-gray-100">
+                                <h3 className="text-sm font-bold text-gray-700">Resumo por Fornecedor</h3>
+                            </div>
+                            <div className="overflow-x-auto max-h-80 overflow-y-auto">
+                                <table className="w-full text-sm text-left">
+                                    <thead className="bg-gray-50/80 border-b text-xs text-gray-500 uppercase tracking-wider sticky top-0">
+                                        <tr>
+                                            <th className="px-3 py-2.5 font-semibold">Fornecedor</th>
+                                            <th className="px-3 py-2.5 font-semibold text-center">Notas</th>
+                                            <th className="px-3 py-2.5 font-semibold text-right">Valor</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-50">
+                                        {resumoCompras.porFornecedor.map((f, i) => (
+                                            <tr key={`${f.fornecedor}-${i}`} className="hover:bg-blue-50/30">
+                                                <td className="px-3 py-2.5 text-gray-700">{f.fornecedor}</td>
+                                                <td className="px-3 py-2.5 text-center text-gray-600">{f.notas}</td>
+                                                <td className="px-3 py-2.5 text-right font-semibold">{formatCurrency(f.valor)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
         </div>
