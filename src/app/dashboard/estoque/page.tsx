@@ -20,14 +20,17 @@ type FiltroEstoque = 'todos' | 'critico' | 'proprio' | 'terceirizado'
 // ── Modal de ajuste de estoque rápido ────────────────────────────────────────
 function ModalAjuste({
     produto,
+    tipoInicial = 'entrada',
     onClose,
     onSuccess,
 }: {
     produto: Produto
+    /** Abre já no modo certo: "Lançar Compra" entra em 'entrada', "Ajustar" em 'ajuste'. */
+    tipoInicial?: 'entrada' | 'saida' | 'ajuste'
     onClose: () => void
     onSuccess: () => void
 }) {
-    const [tipo, setTipo] = useState<'entrada' | 'saida' | 'ajuste'>('entrada')
+    const [tipo, setTipo] = useState<'entrada' | 'saida' | 'ajuste'>(tipoInicial)
     const [quantidade, setQuantidade] = useState('')
     const [observacao, setObservacao] = useState('')
     // Dados da compra — só usados quando tipo === 'entrada' (vão pro histórico do produto)
@@ -37,6 +40,25 @@ function ModalAjuste({
     const [valorTotal, setValorTotal] = useState('')
     const [loading, setLoading] = useState(false)
     const supabase = createClient()
+
+    // Últimas compras do produto — mostradas no topo do modo Entrada para deixar
+    // EVIDENTE que os lançamentos anteriores continuam lá (a dona achava que
+    // lançar uma compra nova apagava a nota antiga).
+    const [ultimasCompras, setUltimasCompras] = useState<
+        { id: string; numero_nota_fiscal: string | null; data_compra: string | null; created_at: string }[]
+    >([])
+    useEffect(() => {
+        let ativo = true
+        supabase
+            .from('movimentacao_estoque')
+            .select('id, numero_nota_fiscal, data_compra, created_at')
+            .eq('produto_id', produto.id)
+            .eq('tipo', 'entrada')
+            .order('created_at', { ascending: false })
+            .limit(3)
+            .then(({ data }) => { if (ativo) setUltimasCompras(data ?? []) })
+        return () => { ativo = false }
+    }, [supabase, produto.id])
 
     // Prévia do custo unitário derivado (total pago ÷ quantidade)
     const qtdNum = parseFloat(quantidade.replace(',', '.'))
@@ -132,9 +154,38 @@ function ModalAjuste({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
                 <div className="px-5 py-4 border-b border-gray-100">
-                    <h3 className="font-bold text-gray-800">Ajuste de Estoque</h3>
+                    <h3 className="font-bold text-gray-800">
+                        {tipo === 'entrada' ? 'Nova Entrada de Mercadoria' : 'Ajuste de Estoque'}
+                    </h3>
                     <p className="text-xs text-gray-500 mt-0.5">{produto.nome} · Atual: <strong>{produto.estoque_atual} {produto.unidade_medida}</strong></p>
                 </div>
+
+                {/* Tranquilizador: cada compra é um lançamento NOVO; o histórico
+                    anterior fica intacto. Mostra as últimas notas como prova. */}
+                {tipo === 'entrada' && (
+                    <div className="mx-5 mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+                        <p className="text-[11px] font-bold text-emerald-800 flex items-center gap-1.5">
+                            <History className="w-3.5 h-3.5" />
+                            Isto NÃO altera as compras anteriores
+                        </p>
+                        <p className="text-[11px] text-emerald-700 mt-0.5 leading-snug">
+                            Cada compra vira um lançamento novo. Você só está somando ao estoque.
+                        </p>
+                        {ultimasCompras.length > 0 && (
+                            <p className="text-[10px] text-emerald-700/80 mt-1.5 leading-snug">
+                                <b>Últimas compras deste item:</b>{' '}
+                                {ultimasCompras.map((c, i) => (
+                                    <span key={c.id}>
+                                        {i > 0 && ' · '}
+                                        {(c.data_compra ?? c.created_at).slice(0, 10).split('-').reverse().join('/')}
+                                        {c.numero_nota_fiscal ? ` (NF ${c.numero_nota_fiscal})` : ''}
+                                    </span>
+                                ))}
+                                {' — continuam no histórico.'}
+                            </p>
+                        )}
+                    </div>
+                )}
                 <div className="p-5 space-y-4">
                     <div className="grid grid-cols-3 gap-2">
                         {(['entrada', 'saida', 'ajuste'] as const).map((t) => (
@@ -501,7 +552,9 @@ export default function EstoquePage() {
     const [busca, setBusca] = useState('')
     const [filtro, setFiltro] = useState<FiltroEstoque>('todos')
     const [modalEditar, setModalEditar] = useState<Produto | null>(null)
-    const [modalAjuste, setModalAjuste] = useState<Produto | null>(null)
+    const [modalAjuste, setModalAjuste] = useState<
+        { produto: Produto; tipoInicial: 'entrada' | 'saida' | 'ajuste' } | null
+    >(null)
     const [modalHistProduto, setModalHistProduto] = useState<Produto | null>(null)
     const [isModalNovo, setIsModalNovo] = useState(false)
     const [isHistoricoOpen, setIsHistoricoOpen] = useState(false)
@@ -748,10 +801,19 @@ export default function EstoquePage() {
                                             {/* Ações */}
                                             <td className="px-5 py-3">
                                                 <div className="flex items-center gap-1.5">
+                                                    {/* Ação dominante: lançar a compra (nota do fornecedor). */}
                                                     <button
-                                                        onClick={() => setModalAjuste(produto)}
+                                                        onClick={() => setModalAjuste({ produto, tipoInicial: 'entrada' })}
+                                                        className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors"
+                                                        title="Lançar uma compra nova (nota do fornecedor) — não altera as compras anteriores"
+                                                    >
+                                                        <Truck className="w-3.5 h-3.5" />
+                                                        Lançar Compra
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setModalAjuste({ produto, tipoInicial: 'ajuste' })}
                                                         className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
-                                                        title="Ajustar estoque"
+                                                        title="Corrigir o saldo ou registrar uma saída"
                                                     >
                                                         <ArrowUpCircle className="w-3.5 h-3.5" />
                                                         Ajustar
@@ -791,7 +853,8 @@ export default function EstoquePage() {
             {/* Modais */}
             {modalAjuste && (
                 <ModalAjuste
-                    produto={modalAjuste}
+                    produto={modalAjuste.produto}
+                    tipoInicial={modalAjuste.tipoInicial}
                     onClose={() => setModalAjuste(null)}
                     onSuccess={fetchProdutos}
                 />
