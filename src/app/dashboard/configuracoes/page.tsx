@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import {
     BarChart3, Building2, UserCog, ArrowRight,
-    Settings, TrendingUp, Shield, CreditCard,
+    Settings, TrendingUp, Shield, CreditCard, Wallet,
 } from 'lucide-react'
 
 const CARDS = [
@@ -12,6 +12,14 @@ const CARDS = [
         description: 'Vendas, metas, desempenho e análises financeiras',
         href: '/dashboard/relatorios',
         icon: BarChart3,
+        color: 'bg-blue-50 text-blue-600 border-blue-100',
+        iconBg: 'bg-blue-100',
+    },
+    {
+        title: 'Despesas',
+        description: 'Custos do negócio por mês: aluguel, contas, equipe e impostos',
+        href: '/dashboard/despesas',
+        icon: Wallet,
         color: 'bg-blue-50 text-blue-600 border-blue-100',
         iconBg: 'bg-blue-100',
     },

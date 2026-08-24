@@ -23,6 +23,10 @@ export type AuditAction =
     | 'produto.deletar'
     | 'receita.deletar'
     | 'mobiliario.deletar'
+    | 'despesa.criar'
+    | 'despesa.editar'
+    | 'despesa.excluir'
+    | 'despesa.copiar_mes'
 
 interface AuditEntry {
     acao: AuditAction
